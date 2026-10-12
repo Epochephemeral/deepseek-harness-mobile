@@ -217,6 +217,144 @@ internal object FeatherIcons {
             moveTo(9f, 18f); lineTo(15f, 12f); lineTo(9f, 6f)
         }
     }
+
+    /** feather:layers */
+    val Layers: ImageVector by lazy {
+        feather("Layers") {
+            moveTo(12f, 2f); lineTo(2f, 7f); lineTo(12f, 12f); lineTo(22f, 7f); close()
+            moveTo(2f, 17f); lineTo(12f, 22f); lineTo(22f, 17f)
+            moveTo(2f, 12f); lineTo(12f, 17f); lineTo(22f, 12f)
+        }
+    }
+
+    /** feather:server */
+    val Server: ImageVector by lazy {
+        feather("Server") {
+            moveTo(4f, 2f); lineTo(20f, 2f); curveTo(21.1f, 2f, 22f, 2.9f, 22f, 4f); lineTo(22f, 8f)
+            curveTo(22f, 9.1f, 21.1f, 10f, 20f, 10f); lineTo(4f, 10f); curveTo(2.9f, 10f, 2f, 9.1f, 2f, 8f)
+            lineTo(2f, 4f); curveTo(2f, 2.9f, 2.9f, 2f, 4f, 2f); close()
+            moveTo(4f, 14f); lineTo(20f, 14f); curveTo(21.1f, 14f, 22f, 14.9f, 22f, 16f); lineTo(22f, 20f)
+            curveTo(22f, 21.1f, 21.1f, 22f, 20f, 22f); lineTo(4f, 22f); curveTo(2.9f, 22f, 2f, 21.1f, 2f, 20f)
+            lineTo(2f, 16f); curveTo(2f, 14.9f, 2.9f, 14f, 4f, 14f); close()
+            moveTo(6f, 6f); lineTo(6.01f, 6f)
+            moveTo(6f, 18f); lineTo(6.01f, 18f)
+        }
+    }
+
+    /** feather:zap */
+    val Zap: ImageVector by lazy {
+        feather("Zap") {
+            moveTo(13f, 2f); lineTo(3f, 14f); lineTo(12f, 14f); lineTo(11f, 22f); lineTo(21f, 10f); lineTo(12f, 10f); close()
+        }
+    }
+
+    /** feather:target */
+    val Target: ImageVector by lazy {
+        feather("Target") {
+            moveTo(22f, 12f); arcTo(10f, 10f, 0f, true, true, 2f, 12f); arcTo(10f, 10f, 0f, true, true, 22f, 12f); close()
+            moveTo(18f, 12f); arcTo(6f, 6f, 0f, true, true, 6f, 12f); arcTo(6f, 6f, 0f, true, true, 18f, 12f); close()
+            moveTo(14f, 12f); arcTo(2f, 2f, 0f, true, true, 10f, 12f); arcTo(2f, 2f, 0f, true, true, 14f, 12f); close()
+        }
+    }
+
+    /** feather:compass */
+    val Compass: ImageVector by lazy {
+        feather("Compass") {
+            moveTo(22f, 12f); arcTo(10f, 10f, 0f, true, true, 2f, 12f); arcTo(10f, 10f, 0f, true, true, 22f, 12f); close()
+            moveTo(16.24f, 7.76f); lineTo(14.12f, 14.12f); lineTo(7.76f, 16.24f); lineTo(9.88f, 9.88f); close()
+        }
+    }
+
+    /** feather:cpu */
+    val Cpu: ImageVector by lazy {
+        feather("Cpu") {
+            moveTo(6f, 4f); lineTo(18f, 4f); curveTo(19.1f, 4f, 20f, 4.9f, 20f, 6f); lineTo(20f, 18f)
+            curveTo(20f, 19.1f, 19.1f, 20f, 18f, 20f); lineTo(6f, 20f); curveTo(4.9f, 20f, 4f, 19.1f, 4f, 18f)
+            lineTo(4f, 6f); curveTo(4f, 4.9f, 4.9f, 4f, 6f, 4f); close()
+            moveTo(9f, 9f); lineTo(15f, 9f); lineTo(15f, 15f); lineTo(9f, 15f); close()
+            moveTo(9f, 1f); lineTo(9f, 4f); moveTo(15f, 1f); lineTo(15f, 4f)
+            moveTo(9f, 20f); lineTo(9f, 23f); moveTo(15f, 20f); lineTo(15f, 23f)
+            moveTo(20f, 9f); lineTo(23f, 9f); moveTo(20f, 14f); lineTo(23f, 14f)
+            moveTo(1f, 9f); lineTo(4f, 9f); moveTo(1f, 14f); lineTo(4f, 14f)
+        }
+    }
+
+    /** feather:list */
+    val List: ImageVector by lazy {
+        feather("List") {
+            moveTo(8f, 6f); lineTo(21f, 6f); moveTo(8f, 12f); lineTo(21f, 12f); moveTo(8f, 18f); lineTo(21f, 18f)
+            moveTo(3f, 6f); lineTo(3.01f, 6f); moveTo(3f, 12f); lineTo(3.01f, 12f); moveTo(3f, 18f); lineTo(3.01f, 18f)
+        }
+    }
+
+    /** feather:users */
+    val Users: ImageVector by lazy {
+        feather("Users") {
+            moveTo(17f, 21f); lineTo(17f, 19f); curveTo(17f, 16.8f, 15.2f, 15f, 13f, 15f); lineTo(5f, 15f)
+            curveTo(2.8f, 15f, 1f, 16.8f, 1f, 19f); lineTo(1f, 21f)
+            moveTo(13f, 7f); arcTo(4f, 4f, 0f, true, true, 5f, 7f); arcTo(4f, 4f, 0f, true, true, 13f, 7f); close()
+            moveTo(23f, 21f); lineTo(23f, 19f); curveTo(23f, 17.2f, 21.8f, 15.6f, 20f, 15.1f)
+            moveTo(16f, 3.1f); curveTo(17.8f, 3.6f, 19f, 5.2f, 19f, 7f); curveTo(19f, 8.8f, 17.8f, 10.4f, 16f, 10.9f)
+        }
+    }
+
+    /** feather:activity */
+    val Activity: ImageVector by lazy {
+        feather("Activity") {
+            moveTo(22f, 12f); lineTo(18f, 12f); lineTo(15f, 21f); lineTo(9f, 3f); lineTo(6f, 12f); lineTo(2f, 12f)
+        }
+    }
+
+    /** feather:map */
+    val Map: ImageVector by lazy {
+        feather("Map") {
+            moveTo(1f, 6f); lineTo(1f, 22f); lineTo(8f, 18f); lineTo(16f, 22f); lineTo(23f, 18f); lineTo(23f, 2f)
+            lineTo(16f, 6f); lineTo(8f, 2f); close()
+            moveTo(8f, 2f); lineTo(8f, 18f); moveTo(16f, 6f); lineTo(16f, 22f)
+        }
+    }
+
+
+    /** feather:refresh-cw */
+    val RefreshCw: ImageVector by lazy {
+        feather("RefreshCw") {
+            moveTo(23f, 4f); lineTo(23f, 10f); lineTo(17f, 10f)
+            moveTo(1f, 20f); lineTo(1f, 14f); lineTo(7f, 14f)
+            moveTo(3.51f, 9f); arcTo(9f, 9f, 0f, false, true, 18.36f, 5.64f); lineTo(23f, 10f)
+            moveTo(1f, 14f); lineTo(5.64f, 18.36f); arcTo(9f, 9f, 0f, false, false, 20.49f, 15f)
+        }
+    }
+
+    /** feather:corner-left-up */
+    val CornerLeftUp: ImageVector by lazy {
+        feather("CornerLeftUp") {
+            moveTo(14f, 9f); lineTo(9f, 4f); lineTo(4f, 9f)
+            moveTo(20f, 20f); lineTo(13f, 20f); curveTo(10.8f, 20f, 9f, 18.2f, 9f, 16f); lineTo(9f, 4f)
+        }
+    }
+
+
+    /** feather:external-link */
+    val ExternalLink: ImageVector by lazy {
+        feather("ExternalLink") {
+            moveTo(18f, 13f); lineTo(18f, 19f); curveTo(18f, 20.1f, 17.1f, 21f, 16f, 21f); lineTo(5f, 21f)
+            curveTo(3.9f, 21f, 3f, 20.1f, 3f, 19f); lineTo(3f, 8f); curveTo(3f, 6.9f, 3.9f, 6f, 5f, 6f); lineTo(11f, 6f)
+            moveTo(15f, 3f); lineTo(21f, 3f); lineTo(21f, 9f)
+            moveTo(10f, 14f); lineTo(21f, 3f)
+        }
+    }
+
+    /** feather:image */
+    val Image: ImageVector by lazy {
+        feather("Image") {
+            moveTo(5f, 3f); lineTo(19f, 3f); curveTo(20.1f, 3f, 21f, 3.9f, 21f, 5f); lineTo(21f, 19f)
+            curveTo(21f, 20.1f, 20.1f, 21f, 19f, 21f); lineTo(5f, 21f); curveTo(3.9f, 21f, 3f, 20.1f, 3f, 19f)
+            lineTo(3f, 5f); curveTo(3f, 3.9f, 3.9f, 3f, 5f, 3f); close()
+            moveTo(10f, 8.5f); arcTo(1.5f, 1.5f, 0f, true, true, 7f, 8.5f); arcTo(1.5f, 1.5f, 0f, true, true, 10f, 8.5f); close()
+            moveTo(21f, 15f); lineTo(16f, 10f); lineTo(5f, 21f)
+        }
+    }
+
 }
 
 // ---------------------------------------------------------------------------

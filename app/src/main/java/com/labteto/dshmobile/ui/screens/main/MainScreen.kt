@@ -1,6 +1,17 @@
 package com.labteto.dshmobile.ui.screens.main
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.unit.dp
+import com.labteto.dshmobile.ui.theme.DsTheme
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -130,11 +141,35 @@ fun MainScreen(onOpenSettings: () -> Unit) {
                     }
                 },
         ) {
-            ChatScreen(
-                onOpenDetails = { detailsOpen = true },
-                onOpenDrawer = { scope.launch { drawerState.open() } },
-                detailsOpen = detailsOpen,
-            )
+            // The chat softens under the open panel: a blur where the platform renders one (API 31+;
+            // below that `blur` is a no-op and the scrim alone does the work).
+            val blur by animateDpAsState(if (detailsOpen) 6.dp else 0.dp, tween(220, easing = FastOutSlowInEasing), label = "detailsBlur")
+            Box(Modifier.fillMaxSize().blur(blur)) {
+                ChatScreen(
+                    onOpenDetails = { detailsOpen = true },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    detailsOpen = detailsOpen,
+                )
+            }
+
+            // Tap anywhere outside the panel to close it — the same contract as the drawer's
+            // scrim. The drag-to-close gesture above still works; this adds the tap.
+            AnimatedVisibility(
+                visible = detailsOpen,
+                enter = fadeIn(DsAnimations.fade),
+                exit = fadeOut(DsAnimations.fade),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DsTheme.colors.overlayMask)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClickLabel = stringResource(R.string.common_close),
+                        ) { detailsOpen = false },
+                )
+            }
 
             AnimatedVisibility(
                 visible = detailsOpen,

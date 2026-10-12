@@ -69,6 +69,19 @@ internal fun parseImageRef(block: ChatBlock): ImageAttachmentRef? {
     return runCatching { decodeFromJsonElement(ImageAttachmentRef.serializer(), attachment) }.getOrNull()
 }
 
+/**
+ * The images a tool result returned, in result order. `read_image` answers
+ * `[text envelope, { type: "image", attachment }]`, and the attachment is durable: it is the image
+ * the model saw, still there after the file on disk has changed or been deleted.
+ */
+internal fun toolResultImages(content: JsonElement?): List<ImageAttachmentRef> =
+    (content as? JsonArray).orEmpty().mapNotNull { block ->
+        val obj = block as? JsonObject ?: return@mapNotNull null
+        if ((obj["type"] as? JsonPrimitive)?.contentOrNull != "image") return@mapNotNull null
+        val attachment = obj["attachment"] as? JsonObject ?: return@mapNotNull null
+        runCatching { decodeFromJsonElement(ImageAttachmentRef.serializer(), attachment) }.getOrNull()
+    }
+
 /** The durable file reference behind a `file` block (harness 0.1.3), or null when malformed. */
 internal fun parseFileRef(block: ChatBlock): FileAttachmentRef? {
     val raw = block.raw as? JsonObject ?: return null

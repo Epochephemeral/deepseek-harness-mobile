@@ -40,7 +40,11 @@ private fun ReasoningContentState(text: String, streaming: Boolean) {
         catch (e: Exception) { limits = null }
     }
     Column {
-        MarkdownText(if (showTranslation) translated ?: text else text)
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text((if (showTranslation) translated ?: text else text).trimEnd(),
+                style = com.labteto.dshmobile.ui.theme.DsType.small13,
+                color = DsTheme.colors.labelTertiary, softWrap = true)
+        }
         val metadata = limits
         if (!streaming && api != null && owner != null && metadata != null &&
             metadata.maxTextChars >= 2 && metadata.preferences.provider in metadata.availableProviders && text.isNotBlank()) {

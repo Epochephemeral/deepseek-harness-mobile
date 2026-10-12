@@ -7,6 +7,7 @@ DSH Mobile speaks the DeepSeek Harness web-client protocol over `/api`. The prot
 | DSH Mobile | Harness | Notes |
 |---|---|---|
 | 0.16.0 (unreleased) | 0.2.1-alpha.2 | All 14 real-host conformance scenarios passed across full and targeted runs; Android and signing gates in [validation](VALIDATION-0.16.0.md) |
+| 0.15.0 | 0.2.1-alpha.1 | Same protocol baseline as 0.13.0 |
 | 0.14.0 | 0.2.1-alpha.1 | Same protocol baseline as 0.13.0; the rewind picker needs dsh-rewind-plugin on the host |
 | 0.13.0 | 0.2.1-alpha.1 | Protocol baseline; real-host conformance and pre-UX Android E2E passed, including an older-host check on 0.2.0-rc.1; see [validation](VALIDATION-0.13.0.md) for final UX verification status |
 | 0.12.2 | 0.2.0-rc.1 | Nothing this client uses changed since 0.1.7-rc.2; 0.1.7-rc.x and 0.1.6-alpha.x hosts still work |
@@ -42,6 +43,16 @@ plugin's `snapshot-auto-cleanup`. The output formats were checked against dsh-re
 0.2.0-rc.1 with 0.15.0-beta.1, and the review fixes were tested on an emulator against a scripted
 host.
 
+0.15.0 sends nothing new to the harness either. Before a preview offers open-on-host, it asks
+`session/canOpenWorkspacePath`, which connection discovery already calls. When a workspace link's
+name suggests the wrong kind (a file without an extension, a folder with a dot in its name), the
+app corrects itself from the `workspace-file/not-directory` error of `workspaceFiles/list` and the
+`workspace-file/not-regular-file` error with `kind: directory` from `workspaceFiles/stat`. Both
+are in the harness source at 0.2.1-alpha.1. On a host that answered differently, the first guess
+would stand and the app would show the error. The contributor checked the screens on a device
+against their own host. The review fixes were tested on an emulator with device tests, not
+against a live host.
+
 - Do not interchange 0.10 and 0.9 on harness 0.1.3 and 0.1.2: live replies and command arguments changed. Upgrade both app and harness, or neither.
 - 0.9.0 cannot speak the 0.1.1 protocol; the handshake fails.
 
@@ -60,7 +71,8 @@ host.
 A relay older than 0.2.0 cannot serve harness ≥ 0.1.2: every proxied call returns 401 without the relay's own harness session. The `dsh-relay` 0.2.1 npm package is a [stale build](https://github.com/sorsama/deepseek-harness-relay/pull/6) that also answers 401; install from source with `dsh plugin --profile web add github:sorsama/deepseek-harness-relay#v0.2.1`. The app reports that 401 as the harness refusing the relay.
 
 Pairing `kind` and `v` are checked and refused, rather than degraded; see [protocol notes](PROTOCOL.md).
-0.13.0 and 0.14.0 retain that relay contract; a live relay run is not yet recorded for either.
+0.13.0, 0.14.0 and 0.15.0 retain that relay contract; a live relay run is not yet recorded for any
+of them.
 
 ## Conformance
 

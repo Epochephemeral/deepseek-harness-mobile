@@ -52,7 +52,13 @@ fun ToolCard(
     iconOverride: ImageVector? = null,
     /** Terminal state from the call's own result; null derives the running bit from the card. */
     state: DisclosureState? = null,
+    header: (@Composable () -> Unit)? = null,
 ) {
+    if (header != null) {
+        header()
+        if (expanded) ToolCardBody(view)
+        return
+    }
     DisclosureRow(
         title = titleOverride ?: view.displayTitle(),
         summary = summaryOverride ?: view.summary(),

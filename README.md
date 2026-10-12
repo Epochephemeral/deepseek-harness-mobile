@@ -93,6 +93,14 @@ a [feature tour](https://github.com/sorsama/deepseek-harness-mobile/wiki/Feature
 - 11 languages — English, 中文, हिन्दी, Español, Français, العربية, বাংলা, Português, Русский,
   اردو, ไทย (RTL aware).
 
+### Added in 0.15.0
+
+- A Check now button for updates in Settings > About. The automatic check also runs again when
+  you come back to the app after a few hours.
+- Workspace links in replies drawn as file and folder pills; a folder opens in Files.
+- A redesigned Details panel, Workspace screen and Settings, with archived sessions on a tab of
+  their own.
+
 ### Added in 0.14.0
 
 - A `/` menu above the composer with the session's commands and skills.

@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,10 +32,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,7 +69,7 @@ import com.labteto.dshmobile.ui.components.FeatherIcons
 import com.labteto.dshmobile.ui.components.MarkdownText
 import com.labteto.dshmobile.ui.components.StateDot
 import com.labteto.dshmobile.ui.components.StateDotState
-import com.labteto.dshmobile.ui.components.ThinkingRow
+import com.labteto.dshmobile.ui.components.ThinkingPanel
 import com.labteto.dshmobile.ui.components.ToolCard
 import com.labteto.dshmobile.ui.components.UserBubble
 import com.labteto.dshmobile.ui.theme.DsAnimations
@@ -315,19 +318,16 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
     ) {
         node.blocks.forEachIndexed { index, block ->
             when (block.kind) {
-                "text" -> MarkdownText(block.text.orEmpty())
-                "reasoning" -> {
+                "text" -> if (!block.text.isNullOrBlank()) MarkdownText(block.text.orEmpty())
+                "reasoning" -> if (!block.text.isNullOrBlank() || streaming) {
                     val expanded = reasoningExpanded[index] ?: false
-                    ThinkingRow(
-                        summary = block.text?.lineSequence()?.firstOrNull()
-                            ?: stringResource(R.string.chat_thinking),
+                    ThinkingPanel(
+                        text = block.text.orEmpty(),
                         expanded = expanded,
                         onToggle = { reasoningExpanded[index] = !expanded },
                         streaming = streaming,
+                        content = { ReasoningContent(block.text.orEmpty(), streaming) },
                     )
-                    AnimatedVisibility(visible = expanded) {
-                        ReasoningContent(block.text.orEmpty(), node.streaming)
-                    }
                 }
                 // Show partial arguments until the durable tool card takes over. The list filter
                 // uses this same predicate so a tool-only streaming message can reach this row.
@@ -413,7 +413,7 @@ private fun ActionIcon(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext) {
+internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: Boolean = false) {
     val colors = DsTheme.colors
     val result = context.nodes
         .filterIsInstance<ToolResultNode>()
@@ -444,10 +444,10 @@ private fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext) {
     }
     val startedAt = context.eventTimes[node.seq]
     val endedAt = result?.let { context.eventTimes[it.seq] }
-    if (startedAt != null && endedAt != null) Text(
-        com.labteto.dshmobile.ui.components.formatDurationMs((endedAt - startedAt).coerceAtLeast(0)),
-        style = DsType.caption11, color = colors.labelCaption,
-    )
+    val elapsed = if (startedAt != null && endedAt != null) {
+        com.labteto.dshmobile.ui.components.formatDurationMs((endedAt - startedAt).coerceAtLeast(0))
+    } else null
+    if (!compact && elapsed != null) Text(elapsed, style = DsType.caption11, color = colors.labelCaption)
     ToolCard(
         view = card,
         expanded = expanded,
@@ -456,8 +456,32 @@ private fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext) {
         summaryOverride = row.summary,
         iconOverride = row.variant.featherIcon(),
         state = state,
+        header = if (compact) ({
+            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable(role = Role.Button) { expanded = !expanded }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Icon(if (node.name == "read_image") FeatherIcons.Image else row.variant.featherIcon(), null, Modifier.size(14.dp), tint = colors.labelTertiary)
+                Text(row.title, style = DsType.small13, color = colors.labelSecondary)
+                Text(row.summary.orEmpty(), Modifier.weight(1f), style = DsType.caption11,
+                    color = colors.labelCaption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (expanded && elapsed != null) Text(elapsed, style = DsType.caption11, color = colors.labelCaption)
+                Text(when (state) { DisclosureState.Error -> "!"; DisclosureState.Running -> "…"; else -> "✓" },
+                    style = DsType.caption11, color = if (state == DisclosureState.Error) colors.error else colors.labelTertiary)
+                Icon(FeatherIcons.ChevronRight, null, Modifier.size(14.dp).graphicsLayer { rotationZ = if (expanded) 90f else 0f }, tint = colors.labelTertiary)
+            }
+        }) else null,
     )
     if (expanded) {
+        // What the call returned, not the file as it is now: the durable attachment survives the
+        // file changing or being deleted, and shares the transcript's decoded-image cache.
+        val images = remember(result?.content) { toolResultImages(result?.content) }
+        images.forEach { ref ->
+            AttachmentImage(
+                attachmentId = ref.attachmentId,
+                intrinsicWidth = ref.width,
+                intrinsicHeight = ref.height,
+                contentDescription = ref.name,
+            )
+        }
         result?.content?.let { JsonDisclosure(stringResource(R.string.chat_output_placeholder), it) }
         result?.meta?.let { JsonDisclosure(node.name, it) }
         PtcChildren(node.callId, context.nodes.filterIsInstance<OtherNode>())

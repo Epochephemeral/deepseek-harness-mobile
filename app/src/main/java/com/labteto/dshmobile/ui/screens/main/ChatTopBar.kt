@@ -34,6 +34,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.labteto.dshmobile.R
 import com.labteto.dshmobile.core.wire.dto.SessionModelsValue
+import com.labteto.dshmobile.ui.components.DsButton
+import com.labteto.dshmobile.ui.components.DsButtonSize
+import com.labteto.dshmobile.ui.components.DsButtonVariant
 import com.labteto.dshmobile.ui.components.DsIconButton
 import com.labteto.dshmobile.ui.components.DsSegment
 import com.labteto.dshmobile.ui.components.DsSegmented
@@ -51,7 +54,7 @@ import com.labteto.dshmobile.ui.theme.DsType
 internal enum class ChatTab { Chat, Trajectory }
 
 /**
- * The session chrome: a two-row bar plus the Chat / Trajectory tabs.
+ * The session chrome: a two-row bar plus the Chat / Trajectory tabs and the Workspace button.
  *
  * Row one carries the controls that belong to the *connection* — the drawer, the model, the live
  * status. Row two carries the ones that belong to the *session* — its title, its agent preset, its
@@ -77,6 +80,8 @@ internal fun ChatTopBar(
     onOpenSubagents: () -> Unit,
     onOpenDetails: () -> Unit,
     onTabChange: (ChatTab) -> Unit,
+    onOpenWorkspace: () -> Unit,
+    workspaceEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = DsTheme.colors
@@ -143,7 +148,7 @@ internal fun ChatTopBar(
             }
         }
 
-        ChatTabRow(tab = tab, onTabChange = onTabChange)
+        ChatTabRow(tab, onTabChange, onOpenWorkspace, workspaceEnabled)
     }
 }
 
@@ -252,7 +257,7 @@ private fun MetaChip(
  * their own; a 28dp track wraps to the labels and lets the chrome end there.
  */
 @Composable
-private fun ChatTabRow(tab: ChatTab, onTabChange: (ChatTab) -> Unit) {
+private fun ChatTabRow(tab: ChatTab, onTabChange: (ChatTab) -> Unit, onOpenWorkspace: () -> Unit, workspaceEnabled: Boolean) {
     val colors = DsTheme.colors
     Row(
         modifier = Modifier
@@ -274,6 +279,17 @@ private fun ChatTabRow(tab: ChatTab, onTabChange: (ChatTab) -> Unit) {
                 onTabChange(if (key == TAB_CHAT) ChatTab.Chat else ChatTab.Trajectory)
             },
             role = Role.Tab,
+        )
+        Spacer(Modifier.weight(1f))
+        // The workspace is a screen of its own, not a third view of the conversation: it opens
+        // over the chat and comes back to it. A button beside the tabs, not among them.
+        DsButton(
+            text = stringResource(R.string.panel_workspace),
+            icon = FeatherIcons.Folder,
+            onClick = onOpenWorkspace,
+            variant = DsButtonVariant.Outline,
+            size = DsButtonSize.Small,
+            enabled = workspaceEnabled,
         )
     }
     Spacer(

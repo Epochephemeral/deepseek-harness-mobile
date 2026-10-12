@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.draw.clip
@@ -66,7 +67,18 @@ import com.labteto.dshmobile.core.wire.dto.SubagentListEntry
 import com.labteto.dshmobile.core.wire.dto.TokenUsageView
 import com.labteto.dshmobile.data.SessionRow
 import com.labteto.dshmobile.ui.components.ContextMeterDetail
-import com.labteto.dshmobile.ui.components.DisclosureRow
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import com.labteto.dshmobile.ui.components.DsCard
+import com.labteto.dshmobile.ui.components.FeatherIcons
+import com.labteto.dshmobile.ui.theme.DsAnimations
 import com.labteto.dshmobile.ui.components.DsButton
 import com.labteto.dshmobile.ui.components.DsButtonSize
 import com.labteto.dshmobile.ui.components.DsButtonVariant
@@ -170,11 +182,10 @@ fun DetailsPanel(
                 verticalArrangement = Arrangement.spacedBy(DsSpacing.small),
             ) {
                 HeaderRow(onClose)
-                if (automationAvailable != false) DsButton(
-                    text = stringResource(R.string.harness_automations), onClick = onOpenAutomations,
-                    variant = DsButtonVariant.Ghost, modifier = Modifier.fillMaxWidth(),
-                )
 
+                // ---- Session --------------------------------------------------------------
+                // The hero: what this session is, where it lives, what it runs on. Always open —
+                // it is the reason the panel exists.
                 SessionCard(
                     session = current?.copy(cwd = com.labteto.dshmobile.core.session.effectiveWorkingDirectory(conversation?.projections, current.cwd)),
                     models = models,
@@ -194,33 +205,16 @@ fun DetailsPanel(
                         scope.launch { store.refreshAgentPresets() }
                         sheet = DetailsSheet.Presets
                     },
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
-                    DsButton(
-                        text = stringResource(R.string.chat_export),
-                        icon = Icons.Filled.Download,
-                        onClick = {
-                            exportLauncher.launch("dsh-session-${currentSessionId.orEmpty()}.zip")
-                        },
-                        variant = DsButtonVariant.Outline,
-                        size = DsButtonSize.Small,
-                        enabled = currentSessionId != null,
-                    )
-                    DsButton(
-                        text = stringResource(R.string.common_copy),
-                        onClick = {
-                            scope.launch {
-                                store.exportSessionUrl()?.let { url ->
-                                    clipboard.setText(AnnotatedString(url))
-                                    toast.second(copiedLabel)
-                                }
+                    onExport = { exportLauncher.launch("dsh-session-${currentSessionId.orEmpty()}.zip") },
+                    onCopyLink = {
+                        scope.launch {
+                            store.exportSessionUrl()?.let { url ->
+                                clipboard.setText(AnnotatedString(url))
+                                toast.second(copiedLabel)
                             }
-                        },
-                        variant = DsButtonVariant.Ghost,
-                        size = DsButtonSize.Small,
-                    )
-                }
+                        }
+                    },
+                )
 
                 val conv = conversation
                 if (conv == null) {
@@ -230,7 +224,11 @@ fun DetailsPanel(
                         color = colors.labelTertiary,
                     )
                 } else {
+                    // ---- Context ----------------------------------------------------------
                     ContextCard(breakdown, pressure, usage, stats)
+
+                    // ---- Activity: what the agent is doing and what is waiting on it --------
+                    PanelSection(stringResource(R.string.details_section_activity))
                     GoalCard(conv, store)
                     PlanCard(conv) { next ->
                         scope.launch { store.runCommand(if (next) "/plan" else "/plan off") }
@@ -246,7 +244,23 @@ fun DetailsPanel(
                     WorkflowCard(conv.nodes)
                 }
 
+                // ---- Host --------------------------------------------------------------------
+                PanelSection(stringResource(R.string.details_section_host))
                 HostCard(hostInfo)
+                if (automationAvailable != false) DsCard(onClick = onOpenAutomations) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(FeatherIcons.Zap, null, Modifier.size(16.dp), tint = colors.labelSecondary)
+                        Spacer(Modifier.width(DsSpacing.small))
+                        Text(
+                            stringResource(R.string.harness_automations),
+                            style = DsType.std14,
+                            color = colors.labelPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp), tint = colors.labelTertiary)
+                    }
+                }
+                Spacer(Modifier.height(DsSpacing.large))
             }
             DsToastHost(toast, modifier = Modifier.fillMaxWidth())
         }
@@ -310,25 +324,80 @@ private fun HeaderRow(onClose: () -> Unit) {
 // Cards
 // ---------------------------------------------------------------------------
 
-/** A titled card that expands on tap and remembers its state for the panel's lifetime. */
+/** A section label between groups of cards. */
+@Composable
+private fun PanelSection(title: String) {
+    Text(
+        title.uppercase(),
+        style = DsType.caption11,
+        color = DsTheme.colors.labelCaption,
+        modifier = Modifier.padding(start = DsSpacing.tiny, top = DsSpacing.small),
+    )
+}
+
+/**
+ * A titled card that expands on tap and remembers its state for the panel's lifetime.
+ *
+ * A bordered block, not a bare disclosure row: the panel is a stack of unrelated things, and
+ * without an edge each one ran into the next. The header is the whole tap target; [summary] is
+ * the one fact worth reading without opening it.
+ */
 @Composable
 private fun Card(
     title: String,
     summary: String? = null,
+    icon: ImageVector? = null,
     initiallyExpanded: Boolean = false,
-    content: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by remember(title) { mutableStateOf(initiallyExpanded) }
-    Column(Modifier.fillMaxWidth().animateContentSize()) {
-        DisclosureRow(
-            title = title,
-            summary = summary,
-            expanded = expanded,
-            onToggle = { expanded = !expanded },
+    val colors = DsTheme.colors
+    val chevron by animateFloatAsState(if (expanded) 90f else 0f, DsAnimations.chevron, label = "detailsChevron")
+    DsCard(verticalArrangement = Arrangement.spacedBy(0.dp), modifier = Modifier.animateContentSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .padding(vertical = DsSpacing.tiny),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (icon != null) {
+                Icon(icon, null, Modifier.size(16.dp), tint = colors.labelSecondary)
+                Spacer(Modifier.width(DsSpacing.small))
+            }
+            // Title takes what the summary leaves; the summary never pushes the chevron off the
+            // trailing edge, which is where a disclosure indicator belongs on every row.
+            Text(
+                title,
+                style = DsType.std14Strong,
+                color = colors.labelPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (summary != null) {
+                Spacer(Modifier.width(DsSpacing.small))
+                Text(
+                    summary,
+                    style = DsType.caption11,
+                    color = colors.labelTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 120.dp),
+                )
+            }
+            Spacer(Modifier.width(DsSpacing.small))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                null,
+                Modifier.size(18.dp).graphicsLayer { rotationZ = chevron },
+                tint = colors.labelTertiary,
+            )
+        }
+        if (expanded) {
             Column(
-                Modifier.padding(start = 24.dp, top = 4.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier.padding(top = DsSpacing.small, bottom = DsSpacing.tiny),
+                verticalArrangement = Arrangement.spacedBy(DsSpacing.xsmall),
             ) {
                 content()
             }
@@ -336,6 +405,7 @@ private fun Card(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SessionCard(
     session: SessionRow?,
@@ -346,56 +416,97 @@ private fun SessionCard(
     onArchive: () -> Unit,
     onOpenModels: () -> Unit,
     onOpenPresets: () -> Unit,
+    onExport: () -> Unit,
+    onCopyLink: () -> Unit,
 ) {
     val colors = DsTheme.colors
     if (session == null) return
     var renaming by remember(session.sessionId) { mutableStateOf(false) }
-    Card(
-        title = session.title ?: session.cwd?.let { technicalDisplay(basename(it)) } ?: technicalDisplay(session.sessionId),
-        summary = session.cwd?.let { technicalDisplay(basename(it)) },
-        initiallyExpanded = true,
-    ) {
-        session.cwd?.let { Text(technicalDisplay(it), style = DsType.caption11, color = colors.labelCaption) }
+    DsCard(verticalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
+        // Title, full — the one thing on this panel that must never be cut short.
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                session.title ?: session.cwd?.let { technicalDisplay(basename(it)) } ?: technicalDisplay(session.sessionId),
+                style = DsType.base16Strong,
+                color = colors.labelPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            if (session.running) {
+                Spacer(Modifier.width(DsSpacing.small))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StateDot(StateDotState.Running)
+                    Spacer(Modifier.width(DsSpacing.tiny))
+                    Text(stringResource(R.string.jobs_running), style = DsType.caption11, color = colors.labelSecondary)
+                }
+            }
+        }
+        // Where it lives: the folder name, then the whole path wrapped under it. Paths are the
+        // thing that tells two same-named projects apart; they are not decoration.
+        session.cwd?.let { cwd ->
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(FeatherIcons.Folder, null, Modifier.size(14.dp).padding(top = 1.dp), tint = colors.labelTertiary)
+                Spacer(Modifier.width(DsSpacing.xsmall))
+                Column {
+                    Text(technicalDisplay(basename(cwd)), style = DsType.small13, color = colors.labelSecondary)
+                    Text(technicalDisplay(cwd), style = DsType.caption11, color = colors.labelCaption, softWrap = true)
+                }
+            }
+        }
         // The model and the preset are the two things about a session people most often come here
         // to check, and until now this panel could show only one of them and could change neither.
         // Both pills carry an onClick, which is also what makes them look pressable.
-        Row(horizontalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
+        Column(verticalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
             models?.let { value ->
                 val group = value.groups.firstOrNull { it.id == value.current.provider }
                 val name = group?.models?.firstOrNull { it.id == value.current.model }?.name
-                DsPill(text = name ?: technicalDisplay(value.current.model), onClick = onOpenModels)
+                MetaRow(stringResource(R.string.chat_model_label)) {
+                    DsPill(text = name ?: technicalDisplay(value.current.model), onClick = onOpenModels)
+                }
             }
             session.agentPreset?.let {
-                DsPill(text = agentPresetLabel(it, presets), onClick = onOpenPresets)
+                // Pressable only while the harness still lets it change (a blank session).
+                MetaRow(stringResource(R.string.details_preset_label)) {
+                    DsPill(text = agentPresetLabel(it, presets), onClick = if (session.blank) onOpenPresets else null)
+                }
             }
         }
-        if (session.running) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StateDot(StateDotState.Running)
-                Spacer(Modifier.width(DsSpacing.xsmall))
-                Text(
-                    stringResource(R.string.jobs_running),
-                    style = DsType.caption11,
-                    color = colors.labelSecondary,
-                )
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
+        HorizontalDivider(color = colors.borderL1)
+        // Actions: the three that change the session, then the two that take it elsewhere. A
+        // flow row, so a narrow panel wraps a button rather than squeezing it to its icon.
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(DsSpacing.xsmall), verticalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
             DsButton(
                 text = stringResource(R.string.common_rename),
+                icon = FeatherIcons.Edit3,
                 onClick = { renaming = true },
-                variant = DsButtonVariant.Ghost,
+                variant = DsButtonVariant.Outline,
                 size = DsButtonSize.Small,
             )
             DsButton(
                 text = stringResource(R.string.chatlist_session_fork),
+                icon = FeatherIcons.GitBranch,
                 onClick = onFork,
-                variant = DsButtonVariant.Ghost,
+                variant = DsButtonVariant.Outline,
                 size = DsButtonSize.Small,
             )
             DsButton(
                 text = stringResource(R.string.common_archive),
+                icon = FeatherIcons.Archive,
                 onClick = onArchive,
+                variant = DsButtonVariant.Outline,
+                size = DsButtonSize.Small,
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(DsSpacing.xsmall), verticalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
+            DsButton(
+                text = stringResource(R.string.chat_export),
+                icon = Icons.Filled.Download,
+                onClick = onExport,
+                variant = DsButtonVariant.Ghost,
+                size = DsButtonSize.Small,
+            )
+            DsButton(
+                text = stringResource(R.string.details_copy_link),
+                onClick = onCopyLink,
                 variant = DsButtonVariant.Ghost,
                 size = DsButtonSize.Small,
             )
@@ -414,6 +525,20 @@ private fun SessionCard(
     }
 }
 
+/** A caption label with the value beside it, for the hero's model / preset lines. */
+@Composable
+private fun MetaRow(label: String, value: @Composable () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = DsType.caption11,
+            color = DsTheme.colors.labelCaption,
+            modifier = Modifier.width(56.dp),
+        )
+        value()
+    }
+}
+
 @Composable
 private fun ContextCard(
     breakdown: ContextBreakdownView?,
@@ -426,6 +551,7 @@ private fun ContextCard(
     Card(
         title = stringResource(R.string.chat_context_title),
         summary = pressure?.usedRatio?.let { "${(it * 100).toInt()}%" },
+        icon = FeatherIcons.Layers,
         initiallyExpanded = true,
     ) {
         ContextMeterDetail(breakdown, pressure)
@@ -468,6 +594,7 @@ private fun GoalCard(conversation: ConversationSnapshot, store: com.labteto.dshm
     Card(
         title = stringResource(R.string.goal_title),
         summary = goal?.objective?.take(40),
+        icon = FeatherIcons.Target,
     ) {
         if (goal == null) {
             Text(stringResource(R.string.goal_none), style = DsType.caption11, color = colors.labelTertiary)
@@ -518,6 +645,7 @@ private fun PlanCard(conversation: ConversationSnapshot, onTogglePlan: (active: 
     Card(
         title = stringResource(R.string.plan_mode_title),
         summary = stringResource(if (active) R.string.plan_mode_state_on else R.string.plan_mode_state_off),
+        icon = FeatherIcons.Map,
         // Open by default: unlike the other cards this one is a control, and a control you have to
         // expand before you can reach is most of the way back to not having it.
         initiallyExpanded = true,
@@ -547,6 +675,7 @@ private fun JobsCard(
     Card(
         title = stringResource(R.string.jobs_title),
         summary = jobs.size.takeIf { it > 0 }?.toString(),
+        icon = FeatherIcons.Cpu,
     ) {
         if (jobs.isEmpty()) {
             Text(stringResource(R.string.jobs_empty), style = DsType.caption11, color = colors.labelTertiary)
@@ -611,6 +740,7 @@ private fun QueueCard(queue: List<QueueItem>, store: com.labteto.dshmobile.data.
     Card(
         title = stringResource(R.string.chat_queue_title),
         summary = queue.size.takeIf { it > 0 }?.toString(),
+        icon = FeatherIcons.List,
     ) {
         if (queue.isEmpty()) {
             Text(
@@ -649,6 +779,7 @@ private fun SubagentsCard(subagents: List<SubagentListEntry>, onOpen: (String) -
     Card(
         title = stringResource(R.string.subagents_title),
         summary = subagents.size.takeIf { it > 0 }?.toString(),
+        icon = FeatherIcons.Users,
     ) {
         if (subagents.isEmpty()) {
             Text(
@@ -695,7 +826,7 @@ private fun WorkflowCard(nodes: List<ChatNode>) {
     val colors = DsTheme.colors
     val workflows = remember(nodes) { parseWorkflows(nodes) }
     if (workflows.isEmpty()) return
-    Card(title = stringResource(R.string.workflow_title), summary = workflows.size.toString()) {
+    Card(title = stringResource(R.string.workflow_title), summary = workflows.size.toString(), icon = FeatherIcons.Activity) {
         workflows.forEach { workflow ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -738,11 +869,13 @@ private fun HostCard(hostInfo: HostDescription?) {
     Card(
         title = stringResource(R.string.settings_host_info),
         summary = stringResource(R.string.connect_protocol_baseline, DshCore.PROTOCOL_BASELINE),
+        icon = FeatherIcons.Server,
     ) {
         Text(
             stringResource(R.string.connect_harness_home, hostInfo.home),
             style = DsType.caption11,
             color = colors.labelCaption,
+            softWrap = true,
         )
     }
 }

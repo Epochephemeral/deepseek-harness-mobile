@@ -14,6 +14,47 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [0.15.0] - 2026-10-09
+
+Reworks the Details panel, the Workspace screen and Settings, draws workspace links in replies as
+file pills, and adds a manual update check. From @mrbeandev (#52), with fixes from review.
+
+### Added
+
+- **Check now.** Settings > About has a button that runs the same GitHub check the app runs on its
+  own and says what it found: a newer version (offered in the usual update dialog), up to date, or
+  GitHub unreachable. A manual check also offers a release you dismissed earlier.
+- **Workspace links as pills.** A reply's link to a workspace path is drawn as a pill with a file
+  or folder icon. A file opens in Preview, and a folder opens Files at that directory. When the
+  name suggests the wrong kind (`LICENSE` is a file, `.github` is a folder), the harness's answer
+  corrects it. http(s) links work as before.
+
+### Changed
+
+- **Details panel.** The session is a card at the top with its full title, folder and path, the
+  model and preset with labels, and its actions as buttons. Context comes next, then an Activity
+  group (goal, plan, jobs, queue, subagents, workflow) and a Host group, each item in a bordered
+  card. Tapping outside the panel closes it. The chat behind it dims, and on Android 12 and later
+  it also blurs.
+- **Workspace.** It opens from a button beside the Chat and Trajectory tabs, as a full screen with
+  the workspace path in its header. Files, Preview and Terminal sit in one segmented control. Files
+  shows folder and file icons and readable sizes, open files and terminals are pills, and each
+  preview has a header with open-on-host, refresh and close. Code previews use the code font in a
+  block that scrolls both ways. Open on host is hidden when the harness reports no desktop, and a
+  failed open says what that means.
+- **Settings and Archived are two tabs.** Each archived session is a card with its title, age,
+  workspace, full path and a Restore button.
+- **The agent preset chip** in the top bar shows only while the session is blank, because the
+  harness fixes the preset once work starts. Details still shows it.
+- **Paragraphs keep their line breaks**, as they do in the web client.
+- **The automatic update check** runs whenever the app comes back to the foreground, at most once
+  every six hours. It used to run once per process, so a phone that kept the app in memory for
+  days never saw a release published after its last cold start.
+
+### Internal
+
+- Device tests cover tapping either edge of a file pill, folder pills and long pill labels.
+
 ## [0.14.0] - 2026-10-08
 
 Adds a `/` menu to the composer and a picker for the dsh-rewind plugin's `/rewind`. Both come from

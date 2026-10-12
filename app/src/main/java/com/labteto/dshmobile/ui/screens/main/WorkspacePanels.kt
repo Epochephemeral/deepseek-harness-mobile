@@ -27,6 +27,28 @@ import com.labteto.dshmobile.R
 import com.labteto.dshmobile.core.wire.RpcResult
 import com.labteto.dshmobile.core.wire.dto.*
 import com.labteto.dshmobile.data.SessionStore
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.labteto.dshmobile.ui.components.DsButton
+import com.labteto.dshmobile.ui.components.DsButtonSize
+import com.labteto.dshmobile.ui.components.DsButtonVariant
+import com.labteto.dshmobile.ui.components.DsIconButton
+import com.labteto.dshmobile.ui.components.DsPill
+import com.labteto.dshmobile.ui.components.DsSegment
+import com.labteto.dshmobile.ui.components.DsSegmented
+import com.labteto.dshmobile.ui.components.EmptyHero
+import com.labteto.dshmobile.ui.components.FeatherIcons
+import com.labteto.dshmobile.ui.theme.DsShapes
+import com.labteto.dshmobile.ui.theme.DsSpacing
+import com.labteto.dshmobile.ui.theme.DsType
+import androidx.compose.ui.unit.sp
+import com.labteto.dshmobile.ui.components.DsCard
 import com.labteto.dshmobile.ui.components.MarkdownText
 import com.labteto.dshmobile.ui.theme.DsTheme
 import kotlinx.coroutines.*
@@ -39,6 +61,40 @@ internal fun <T> RpcResult<T>.requireValue(): T = when (this) {
 
 @Composable
 internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: () -> Unit) {
+    val colors = DsTheme.colors
+    val sessions by store.sessions.collectAsStateWithLifecycle()
+    val cwd = sessions.firstOrNull { it.sessionId == state.key.sessionId }?.cwd
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = colors.bgBase) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = DsSpacing.small, vertical = DsSpacing.xsmall),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DsIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.common_back),
+                        onClick = onDismiss,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.panel_workspace), style = DsType.large20, color = colors.labelPrimary)
+                        cwd?.let {
+                            Text(technicalDisplay(it), style = DsType.caption11, color = colors.labelCaption, softWrap = true)
+                        }
+                    }
+                }
+                WorkspacePanelBody(store, state, Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+/**
+ * The workspace browser itself — Files / Preview / Terminal — without the screen's header, which
+ * [WorkspacePanels] draws around it.
+ */
+@Composable
+internal fun WorkspacePanelBody(store: SessionStore, state: PanelState, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val key = state.key
@@ -49,14 +105,24 @@ internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: 
         scope.launch {
             try {
                 val api = store.apiForHost(key.host) ?: error(context.getString(R.string.common_offline))
-                state.listing = api.workspaceFileList(key.sessionId, path).requireValue()
-                state.directory = path
+                when (val result = api.workspaceFileList(key.sessionId, path)) {
+                    is RpcResult.Ok -> { state.listing = result.value; state.directory = path }
+                    // A reference guessed to be a folder (see isFolderReference) that names a
+                    // file: show the file, and leave Files on the folder that holds it.
+                    is RpcResult.Err -> if (result.error.code == "workspace-file/not-directory") {
+                        state.directory = path.substringBeforeLast('/', ".").ifEmpty { "." }
+                        state.listing = null
+                        state.open(path)
+                    } else result.requireValue()
+                }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { state.error = e.message }
             finally { state.busy = false }
         }
     }
-    LaunchedEffect(key) { if (state.listing == null) listDirectory(state.directory) }
+    // Keyed on the directory and on a missing listing too: `browse()` clears the listing and may
+    // set a new directory, and either must fetch even though the session is unchanged.
+    LaunchedEffect(key, state.directory, state.listing == null) { if (state.listing == null) listDirectory(state.directory) }
     // Invalidate previews when the host reports a file observation. OS-only changes are checked
     // by stat each time a tab opens and by the explicit Refresh action.
     //
@@ -100,74 +166,163 @@ internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: 
             catch (_: Exception) { /* As above: the feed is an optimisation, not a dependency. */ }
         }
     }
-    CompositionLocalProvider(com.labteto.dshmobile.ui.components.LocalFileOpener provides { path: String ->
-        state.open(activeDocument?.let { com.labteto.dshmobile.core.session.resolvePreviewReference(it, path) } ?: path)
-    }) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = DsTheme.colors.bgBase) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_back)) }
-                    Text(stringResource(R.string.panel_workspace), modifier = Modifier.padding(16.dp))
-                }
-                TabRow(selectedTabIndex = state.section) {
-                    listOf(R.string.panel_files, R.string.panel_preview, R.string.panel_terminal).forEachIndexed { i, title ->
-                        Tab(selected = state.section == i, onClick = { state.section = i }, text = { Text(stringResource(title)) })
-                    }
-                }
+    // A link in a previewed document is relative to that document, folders as much as files.
+    fun resolve(path: String) = activeDocument?.let { com.labteto.dshmobile.core.session.resolvePreviewReference(it, path) } ?: path
+    CompositionLocalProvider(
+        com.labteto.dshmobile.ui.components.LocalFileOpener provides { path: String -> state.open(resolve(path)) },
+        com.labteto.dshmobile.ui.components.LocalFolderOpener provides { path: String -> state.browse(resolve(path)) },
+    ) {
+            val colors = DsTheme.colors
+            Column(modifier.padding(horizontal = DsSpacing.medium), verticalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
+                DsSegmented(
+                    segments = listOf(
+                        DsSegment("0", stringResource(R.string.panel_files)),
+                        DsSegment("1", stringResource(R.string.panel_preview) + state.previews.size.takeIf { it > 0 }?.let { " · $it" }.orEmpty()),
+                        DsSegment("2", stringResource(R.string.panel_terminal)),
+                    ),
+                    selectedKey = state.section.toString(),
+                    onSelect = { state.section = it.toInt() },
+                    role = Role.Tab,
+                    stretch = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 when (state.section) {
                     0 -> {
-                        Row(Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { listDirectory(".") }, enabled = !state.busy) { Text(stringResource(R.string.panel_root)) }
-                            TextButton(onClick = { listDirectory(state.directory.substringBeforeLast('/', ".").ifEmpty { "." }) }, enabled = !state.busy) {
-                                Text(stringResource(R.string.panel_parent))
-                            }
-                            TextButton(onClick = { listDirectory(state.directory) }, enabled = !state.busy) { Text(stringResource(R.string.common_retry)) }
+                        // Toolbar: where you are, and the two moves that are always meaningful.
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
+                            DsButton(
+                                text = stringResource(R.string.panel_root),
+                                icon = FeatherIcons.Folder,
+                                onClick = { listDirectory(".") },
+                                enabled = !state.busy && state.directory != ".",
+                                variant = DsButtonVariant.Outline,
+                                size = DsButtonSize.Small,
+                            )
+                            DsButton(
+                                text = stringResource(R.string.panel_parent),
+                                icon = FeatherIcons.CornerLeftUp,
+                                onClick = { listDirectory(state.directory.substringBeforeLast('/', ".").ifEmpty { "." }) },
+                                enabled = !state.busy && state.directory != ".",
+                                variant = DsButtonVariant.Outline,
+                                size = DsButtonSize.Small,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            DsIconButton(
+                                icon = FeatherIcons.RefreshCw,
+                                contentDescription = stringResource(R.string.common_retry),
+                                onClick = { listDirectory(state.directory) },
+                                enabled = !state.busy,
+                            )
                         }
-                        Text(technicalDisplay(state.directory), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-                        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        state.error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-                        if (state.listing?.truncated == true) Text(stringResource(R.string.panel_truncated), Modifier.padding(16.dp))
-                        LazyColumn(Modifier.weight(1f), state = state.directoryScroll.getOrPut(state.directory) { androidx.compose.foundation.lazy.LazyListState() }) {
-                            items(state.listing?.entries.orEmpty(), key = { it.name }) { entry ->
-                                ListItem(headlineContent = { Text(technicalDisplay(entry.name)) },
-                                    supportingContent = { Text(if (entry.type == "directory") stringResource(R.string.panel_folder) else entry.size?.let { "$it B" }.orEmpty()) },
-                                    modifier = Modifier.clickable(enabled = !state.busy) {
-                                        val path = if (state.directory == ".") entry.name else "${state.directory}/${entry.name}"
-                                        if (entry.type == "directory") listDirectory(path) else state.open(path)
-                                    })
+                        Text(
+                            technicalDisplay(if (state.directory == ".") "/" else state.directory),
+                            style = DsType.caption11,
+                            color = colors.labelCaption,
+                            softWrap = true,
+                        )
+                        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = colors.accent, trackColor = colors.borderL1)
+                        state.error?.let { Text(it, style = DsType.small13, color = colors.error) }
+                        if (state.listing?.truncated == true) {
+                            Text(stringResource(R.string.panel_truncated), style = DsType.caption11, color = colors.warnLabel)
+                        }
+                        val entries = state.listing?.entries.orEmpty()
+                            .sortedWith(compareBy({ it.type != "directory" }, { it.name.lowercase() }))
+                        if (!state.busy && state.listing != null && entries.isEmpty() && state.error == null) {
+                            Text(stringResource(R.string.panel_empty_folder), style = DsType.std14, color = colors.labelTertiary, modifier = Modifier.padding(DsSpacing.medium))
+                        }
+                        LazyColumn(
+                            Modifier.weight(1f),
+                            state = state.directoryScroll.getOrPut(state.directory) { androidx.compose.foundation.lazy.LazyListState() },
+                            verticalArrangement = Arrangement.spacedBy(DsSpacing.tiny),
+                        ) {
+                            items(entries, key = { it.name }) { entry ->
+                                val directory = entry.type == "directory"
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(DsShapes.row)
+                                        .clickable(enabled = !state.busy) {
+                                            val path = if (state.directory == ".") entry.name else "${state.directory}/${entry.name}"
+                                            if (directory) listDirectory(path) else state.open(path)
+                                        }
+                                        .padding(horizontal = DsSpacing.small, vertical = DsSpacing.xsmall),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(DsSpacing.small),
+                                ) {
+                                    Icon(
+                                        if (directory) FeatherIcons.Folder else FeatherIcons.FileText,
+                                        null,
+                                        Modifier.size(18.dp),
+                                        tint = if (directory) colors.accent else colors.labelTertiary,
+                                    )
+                                    Text(
+                                        technicalDisplay(entry.name),
+                                        style = DsType.std14,
+                                        color = colors.labelPrimary,
+                                        modifier = Modifier.weight(1f),
+                                        softWrap = true,
+                                    )
+                                    if (directory) {
+                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = colors.labelCaption)
+                                    } else {
+                                        entry.size?.let { Text(formatBytes(it), style = DsType.caption11, color = colors.labelCaption) }
+                                    }
+                                }
                             }
                         }
                     }
                     1 -> {
-                        if (state.previews.isEmpty()) Text(stringResource(R.string.panel_preview_empty), Modifier.padding(24.dp))
-                        else {
-                            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        if (state.previews.isEmpty()) {
+                            EmptyHero(headline = stringResource(R.string.panel_preview_empty), subtitle = stringResource(R.string.panel_preview_hint), showPreview = false)
+                        } else {
+                            // Open files as pills; the live one is selected.
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(DsSpacing.xsmall)) {
                                 state.previews.forEachIndexed { i, preview ->
-                                    TextButton(onClick = { state.selectedPreview = i }) { Text(technicalDisplay(preview.path.substringAfterLast('/').substringAfterLast('\\'))) }
+                                    DsPill(
+                                        text = technicalDisplay(preview.path.substringAfterLast('/').substringAfterLast('\\')),
+                                        selected = i == state.selectedPreview,
+                                        onClick = { state.selectedPreview = i },
+                                    )
                                 }
                             }
                             val index = state.selectedPreview.coerceIn(0, state.previews.lastIndex)
                             val preview = state.previews[index]
-                            Row {
-                                TextButton(onClick = { state.previews.removeAt(index); state.selectedPreview = (index - 1).coerceAtLeast(0) }) { Text(stringResource(R.string.common_close)) }
-                                TextButton(onClick = { preview.stat = null; preview.text = null; preview.bytes = null }) { Text(stringResource(R.string.common_retry)) }
+                            key(preview) {
+                                DocumentPreview(
+                                    store, key, preview, Modifier.weight(1f),
+                                    onClose = { state.previews.removeAt(index); state.selectedPreview = (index - 1).coerceAtLeast(0) },
+                                    onDirectory = {
+                                        state.previews.remove(preview); state.selectedPreview = (index - 1).coerceAtLeast(0)
+                                        state.browse(preview.path)
+                                    },
+                                )
                             }
-                            key(preview) { DocumentPreview(store, key, preview, Modifier.weight(1f)) }
                         }
                     }
                     2 -> TerminalPanel(store, state, Modifier.weight(1f))
                 }
             }
-        }
-    }
     }
 }
 
 @Composable
-private fun DocumentPreview(store: SessionStore, key: ComposerKey, tab: PreviewTab, modifier: Modifier) {
+private fun DocumentPreview(
+    store: SessionStore, key: ComposerKey, tab: PreviewTab, modifier: Modifier,
+    onClose: () -> Unit, onDirectory: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val colors = DsTheme.colors
+    // "Open on host" needs a desktop on the harness computer. A headless host (a server behind a
+    // tunnel, a container) says so up front through `canOpenWorkspacePath`, and the button is
+    // withheld rather than offered and failed. Null while the answer is still in flight.
+    var canOpenOnHost by remember(key.host) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(key.host) {
+        canOpenOnHost = runCatching {
+            store.apiForHost(key.host)?.sessionCanOpenWorkspacePath()?.let { (it as? RpcResult.Ok)?.value } ?: false
+        }.getOrDefault(false)
+    }
+    val openFailed = stringResource(R.string.panel_open_host_failed)
     val extension = tab.path.substringAfterLast('.', "").lowercase()
     val binary = extension in setOf("png", "jpg", "jpeg", "webp", "gif", "pdf")
     fun load(more: Boolean = false) {
@@ -176,7 +331,13 @@ private fun DocumentPreview(store: SessionStore, key: ComposerKey, tab: PreviewT
         scope.launch {
             try {
                 val api = store.apiForHost(key.host) ?: error(context.getString(R.string.common_offline))
-                val stat = api.workspaceFileStat(key.sessionId, tab.path).requireValue()
+                val statResult = api.workspaceFileStat(key.sessionId, tab.path)
+                // A reference guessed to be a file that names a folder (`.github`): browse it.
+                if (statResult is RpcResult.Err && statResult.error.code == "workspace-file/not-regular-file" &&
+                    (statResult.error.details as? kotlinx.serialization.json.JsonObject)?.get("kind")
+                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } == "directory"
+                ) { onDirectory(); return@launch }
+                val stat = statResult.requireValue()
                 val changed = stat.version != tab.stat?.version
                 if (changed) { tab.text = null; tab.bytes = null; tab.nextLine = 1; tab.eof = false }
                 tab.stat = stat
@@ -202,15 +363,56 @@ private fun DocumentPreview(store: SessionStore, key: ComposerKey, tab: PreviewT
     }
     LaunchedEffect(tab) { load() }
     LaunchedEffect(tab.stat) { if (tab.stat == null) load() }
-    Column(modifier.fillMaxWidth()) {
-        SelectionContainer { Text(technicalDisplay(tab.path), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
-        if (tab.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        tab.error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        TextButton(onClick = { scope.launch {
-            try { store.apiForHost(key.host)?.sessionOpenWorkspacePath(key.sessionId, tab.path)?.requireValue() }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) { tab.error = e.message }
-        } }) { Text(stringResource(R.string.panel_open_host)) }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
+        // File header: name, path and size on the left; the three actions on the right.
+        DsCard(verticalArrangement = Arrangement.spacedBy(DsSpacing.tiny)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (binary) FeatherIcons.Image else FeatherIcons.FileText,
+                    null,
+                    Modifier.size(18.dp),
+                    tint = colors.labelTertiary,
+                )
+                Spacer(Modifier.width(DsSpacing.small))
+                Column(Modifier.weight(1f)) {
+                    val name = tab.path.substringAfterLast('/').substringAfterLast('\\')
+                    Text(technicalDisplay(name), style = DsType.std14Strong, color = colors.labelPrimary)
+                    // The folder it is in, when it is in one; a root file would only repeat its name.
+                    val folder = tab.path.replace('\\', '/').substringBeforeLast('/', "")
+                    val meta = listOfNotNull(
+                        folder.takeIf { it.isNotEmpty() }?.let { technicalDisplay("$it/") },
+                        tab.stat?.bytes?.let { formatBytes(it) },
+                    ).joinToString(" · ")
+                    if (meta.isNotEmpty()) {
+                        SelectionContainer {
+                            Text(meta, style = DsType.caption11, color = colors.labelCaption, softWrap = true)
+                        }
+                    }
+                }
+                if (canOpenOnHost == true) DsIconButton(
+                    icon = FeatherIcons.ExternalLink,
+                    contentDescription = stringResource(R.string.panel_open_host),
+                    onClick = { scope.launch {
+                        try { store.apiForHost(key.host)?.sessionOpenWorkspacePath(key.sessionId, tab.path)?.requireValue() }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { tab.error = openFailed }
+                    } },
+                )
+                DsIconButton(
+                    icon = FeatherIcons.RefreshCw,
+                    contentDescription = stringResource(R.string.common_retry),
+                    onClick = { tab.stat = null; tab.text = null; tab.bytes = null },
+                    enabled = !tab.busy,
+                )
+                DsIconButton(
+                    icon = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.common_close),
+                    onClick = onClose,
+                )
+            }
+        }
+        if (tab.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = colors.accent, trackColor = colors.borderL1)
+        tab.error?.let { Text(it, style = DsType.small13, color = colors.error) }
         when {
             extension == "pdf" && tab.bytes != null -> PdfPreview(tab.bytes!!, Modifier.weight(1f))
             binary && tab.bytes != null -> {
@@ -266,12 +468,46 @@ private fun DocumentPreview(store: SessionStore, key: ComposerKey, tab: PreviewT
                 }, update = { it.loadDataWithBaseURL(base.toString(), tab.text.orEmpty(), if (extension == "svg") "image/svg+xml" else "text/html", "utf-8", null) },
                     onRelease = { it.destroy() })
             }
-            tab.text != null -> SelectionContainer(Modifier.weight(1f).verticalScroll(tab.scroll).padding(16.dp)) {
-                if (extension in setOf("md", "markdown")) DocumentMarkdown(tab.text.orEmpty())
-                else Text(tab.text.orEmpty(), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            tab.text != null -> {
+                // Markdown reads as a document; everything else is code, in the app's code font on
+                // a code background with the file's own line breaks, scrollable both ways.
+                val markdown = extension in setOf("md", "markdown")
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clip(DsShapes.block)
+                        .background(if (markdown) androidx.compose.ui.graphics.Color.Transparent else colors.bgLayer1)
+                        .then(if (markdown) Modifier else Modifier.border(1.dp, colors.borderL2, DsShapes.block)),
+                ) {
+                    SelectionContainer(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(tab.scroll)
+                            .then(if (markdown) Modifier else Modifier.horizontalScroll(rememberScrollState()))
+                            .padding(DsSpacing.medium),
+                    ) {
+                        if (markdown) DocumentMarkdown(tab.text.orEmpty())
+                        else Text(
+                            tab.text.orEmpty(),
+                            style = DsType.caption11.copy(fontFamily = DsType.codeFont, fontSize = 12.sp, lineHeight = 18.sp),
+                            color = colors.labelPrimary,
+                            softWrap = false,
+                        )
+                    }
+                }
             }
         }
-        if (!tab.eof && tab.text != null) TextButton(onClick = { load(true) }, enabled = !tab.busy) { Text(stringResource(R.string.panel_more)) }
+        if (!tab.eof && tab.text != null) {
+            DsButton(
+                text = stringResource(R.string.panel_more),
+                onClick = { load(true) },
+                enabled = !tab.busy,
+                variant = DsButtonVariant.Outline,
+                size = DsButtonSize.Small,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -314,4 +550,11 @@ private fun PdfPreview(bytes: ByteArray, modifier: Modifier) {
             TextButton(onClick = { page++ }, enabled = page + 1 < count) { Text(stringResource(R.string.panel_next)) }
         }
     }
+}
+
+/** `1.2 KB`, `3.4 MB` — a size a person can read beside a file name. */
+private fun formatBytes(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
+    else -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
 }

@@ -27,6 +27,17 @@ internal class PanelState(val key: ComposerKey) {
     var selectedTerminal by mutableStateOf<String?>(null)
     var shells by mutableStateOf<List<TerminalShell>>(emptyList())
     var shellPath by mutableStateOf<String?>(null)
+    /**
+     * Show Files at [path]. The listing is cleared so the panel fetches it when it next composes,
+     * which is the same route the Files toolbar takes.
+     */
+    fun browse(path: String) {
+        directory = path.trimEnd('/').ifEmpty { "." }
+        listing = null
+        error = null
+        section = 0
+    }
+
     fun open(path: String) {
         val index = previews.indexOfFirst { it.path == path }
         if (index >= 0) selectedPreview = index else {

@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -414,8 +415,12 @@ fun ChatScreen(
     androidx.compose.runtime.CompositionLocalProvider(
         com.labteto.dshmobile.ui.media.LocalAttachmentScope provides (composer.key.host to composer.key.sessionId),
         com.labteto.dshmobile.ui.components.LocalFileOpener provides { path: String ->
-        store.panels.get(composer.key).open(path); panelKey = composer.key
-    }) {
+            store.panels.get(composer.key).open(path); panelKey = composer.key
+        },
+        com.labteto.dshmobile.ui.components.LocalFolderOpener provides { path: String ->
+            store.panels.get(composer.key).browse(path); panelKey = composer.key
+        },
+    ) {
     Surface(modifier = Modifier.fillMaxSize(), color = colors.bgBase) {
         // The activity draws edge to edge, so every top-level surface has to consume the insets
         // itself or the chrome ends up underneath the status bar. safeDrawing covers the status
@@ -425,7 +430,12 @@ fun ChatScreen(
                 title = title,
                 running = conversation?.running == true,
                 models = models,
-                agentPresetLabel = currentSession?.agentPreset?.takeIf { agentPresets?.modeSelectionEnabled != false }?.let { agentPresetLabel(it, agentPresets) },
+                // The harness pins the preset once a session has started, so the chip — which
+                // reads as a picker — is only offered while the session is still blank. After
+                // that the preset is a fact, and the Details panel states it as one.
+                agentPresetLabel = currentSession?.agentPreset
+                    ?.takeIf { agentPresets?.modeSelectionEnabled != false && currentSession.blank }
+                    ?.let { agentPresetLabel(it, agentPresets) },
                 subagentCount = subagents.size,
                 detailsOpen = detailsOpen,
                 tab = tab,
@@ -438,13 +448,12 @@ fun ChatScreen(
                 onOpenSubagents = { sheet = ChatSheet.Subagents },
                 onOpenDetails = onOpenDetails,
                 onTabChange = { tab = it },
+                onOpenWorkspace = { panelKey = composer.key },
+                workspaceEnabled = currentSessionId != null,
             )
 
             connectionError?.let {
                 androidx.compose.material3.TextButton(onClick = { store.retryConnection() }) { ConnectionBanner(it) }
-            }
-            androidx.compose.material3.TextButton(onClick = { panelKey = composer.key }, enabled = currentSessionId != null) {
-                androidx.compose.material3.Text(stringResource(R.string.panel_workspace))
             }
             if (conversation?.gap == true) {
                 ConnectionBanner(stringResource(R.string.common_reconnecting))

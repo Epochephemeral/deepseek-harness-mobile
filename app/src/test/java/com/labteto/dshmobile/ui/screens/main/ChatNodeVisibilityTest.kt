@@ -174,6 +174,16 @@ class ChatNodeVisibilityTest {
         assertEquals(listOf(3L, 4L, 5L), nodes.filter { it.rendersContent() }.map { it.seq })
     }
 
+    /** An empty reasoning block is spacing once settled, but the Thinking row while it streams. */
+    @Test fun `blank reasoning renders only while its message is live`() {
+        val live = AssistantMessageNode(seq = 9, messageId = null, turn = 1, step = 1, streaming = true,
+            blocks = listOf(ChatBlock(kind = "reasoning", text = "")))
+        assertTrue(live.rendersContent(running = true))
+        assertFalse(live.rendersContent(running = false))
+        assertFalse(live.copy(streaming = false).rendersContent(running = true))
+        assertTrue(live.copy(streaming = false, blocks = listOf(ChatBlock("reasoning", "plan"))).rendersContent())
+    }
+
     /** A rewind withdraws its range from the transcript; its marker stays, drawn as the divider. */
     @Test fun `a rewind cut hides what it withdrew and keeps its marker as the divider`() {
         fun user(seq: Long, kind: String = "user") = UserMessageNode(seq, "m$seq", listOf(ChatBlock("text", "text $seq")), kind)
