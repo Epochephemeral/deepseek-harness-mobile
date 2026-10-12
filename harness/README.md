@@ -1,7 +1,7 @@
 # LAN setup for DSH Mobile
 
-This guide targets harness `0.2.0-rc.1`, and still applies to `0.1.7-rc.x` and
-`0.1.6-alpha.x`.
+This guide targets harness `0.2.1-alpha.2`. The patch instructions below remain
+available for `0.2.0-rc.1`, `0.1.7-rc.x`, and `0.1.6-alpha.x`.
 
 The harness authenticates every API call and WebSocket stream. On startup it prints a
 root URL containing a launch token. In DSH Mobile, connect to the host, choose **Sign in**,
@@ -19,12 +19,22 @@ For USB or an emulator, keep the default loopback listener and run
 `adb reverse tcp:3080 tcp:3080`, then connect to `127.0.0.1:3080` and sign in.
 No LAN patch is needed.
 
-The web listener defaults to `127.0.0.1`; `dsh web --host 0.0.0.0` remains unsupported.
-For LAN serving, use the host's user patch layer below. Host/Origin checks are separate
+The web listener defaults to `127.0.0.1`. Alpha.2 accepts a specific IPv4 or IPv6
+bind address, so a LAN connection no longer needs a patch:
+
+```sh
+dsh web --host 192.168.1.20
+```
+
+Use the computer's actual LAN address. Wildcard binds such as `0.0.0.0` remain
+unsupported by the CLI. The listener's own bind address passes the Host fence;
+add `--trusted-host myhost.local` when using a hostname instead.
+
+Host/Origin checks are separate
 from authentication: an untrusted authority gets 403, while a trusted authority without
 a valid browser session gets 401.
 
-## Steps
+## Older hosts: LAN patch
 
 1. Locate your harness home: `$DSH_HOME` or `~/.dsh` (on Windows typically
    `C:\Users\<you>\.dsh`). The web profile lives at
@@ -68,10 +78,21 @@ a valid browser session gets 401.
    screen, then tap **Scan network** or enter `192.168.1.20` / `3080` manually.
    Relay mode will not find a harness patched this way — it looks for relays.
 
+## Native HTTPS (alpha.2)
+
+```sh
+dsh web --host 192.168.1.20 --tls-cert /path/server.crt --tls-key /path/server.key
+```
+
+The certificate must match the address used by the phone and chain to a trusted
+certificate authority. Enter the full `https://` URL and port in the app, then
+sign in with the startup link. HTTP and native HTTPS sessions have distinct
+cookie audiences; sign in again when changing protocols.
+
 ## HTTPS via your own reverse proxy
 
-The harness never serves TLS itself, but the app can connect through a
-reverse proxy that does — Caddy, nginx, Traefik — for setups like
+The app can also connect through a TLS reverse proxy, such as Caddy, nginx,
+or Traefik, for setups like
 `https://agent.home` on a homelab. What has to be true:
 
 1. **The proxy terminates TLS and forwards to the harness** (loopback or the

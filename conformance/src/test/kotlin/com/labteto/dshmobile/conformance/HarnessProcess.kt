@@ -45,6 +45,7 @@ class HarnessProcess private constructor(
 
     /** A disposable directory the harness may use as a session workspace. */
     val workspacePath: String get() = workspace.absolutePath
+    val tlsCertificate: File? get() = File(home, "tls-cert.pem").takeIf { it.isFile }
 
     override fun close() {
         val children = process.toHandle().descendants().use { it.toList() }
@@ -65,7 +66,7 @@ class HarnessProcess private constructor(
         private const val CLI_ENTRY = "apps/cli/src/bin.ts"
 
         /** The launch line the web profile prints exactly once, carrying a fresh token per process. */
-        private val READY_LINE = Regex("""dsh web: (http://\S+)""")
+        private val READY_LINE = Regex("""dsh web: (https?://\S+)""")
 
         /**
          * The harness checkout to run, or null when there is nothing usable.
@@ -140,12 +141,21 @@ class HarnessProcess private constructor(
          * @param model a scriptable model server to point the harness at, or null to leave it with
          *   a fake key and no base URL — enough to boot and serve, but not to run a turn.
          */
-        fun start(model: MockModel? = null, patch: String? = null): HarnessProcess {
+        fun start(model: MockModel? = null, patch: String? = null, tls: Boolean = false): HarnessProcess {
             val root = requireNotNull(checkout()) { "no harness checkout; call available() first" }
             val node = requireNotNull(node()) { "node is not on PATH" }
             val port = freePort()
             val home = createTempDir("dsh-home")
             val workspace = createTempDir("dsh-workspace")
+            val tlsArgs = if (tls) {
+                val fixture = File(root, "packages/host/webserver/tests/tls-fixture.ts").toURI().toString()
+                val script = "import { materializeTlsFixture } from '$fixture'; await materializeTlsFixture(process.argv[1]);"
+                val generate = ProcessBuilder(node, "--import", tsxLoaderHref(root, node), "--input-type=module", "-e", script, home.absolutePath)
+                    .directory(root).redirectErrorStream(true).start()
+                val output = generate.inputStream.bufferedReader().readText()
+                check(generate.waitFor(30, TimeUnit.SECONDS) && generate.exitValue() == 0) { "TLS fixture generation failed: $output" }
+                listOf("--tls-cert", File(home, "tls-cert.pem").absolutePath, "--tls-key", File(home, "tls-key.pem").absolutePath)
+            } else emptyList()
 
             if (model != null && namesItsProtocol(root)) {
                 // Through 0.1.6 the provider's protocol had to be named, or the adapter picked its
@@ -165,7 +175,7 @@ class HarnessProcess private constructor(
             val command = listOf(
                 node, "--import", tsxLoaderHref(root, node),
                 File(root, CLI_ENTRY).absolutePath,
-            ) + patchArgs + listOf("--profile", "web", "--no-open", "--port", port.toString())
+            ) + patchArgs + listOf("--profile", "web", "--no-open", "--port", port.toString()) + tlsArgs
             val builder = ProcessBuilder(command)
                 .directory(workspace)
                 .redirectErrorStream(true)
@@ -177,6 +187,12 @@ class HarnessProcess private constructor(
                 put("DSH_AGENTS_HOME", File(home, "agents").absolutePath)
                 put("DSH_TELEMETRY_DISABLED", "1")
                 put("NODE_NO_WARNINGS", "1")
+                // Plugin management spawns pnpm too: use the checkout's declared toolchain,
+                // not an unrelated global pnpm (notably pnpm 9 with a pnpm 11 profile).
+                val localBin = File(root, "node_modules/.bin")
+                if (File(localBin, if (isWindows()) "pnpm.cmd" else "pnpm").isFile) {
+                    put("PATH", localBin.absolutePath + File.pathSeparator + System.getenv("PATH").orEmpty())
+                }
                 put("TSX_TSCONFIG_PATH", File(root, "tsconfig.json").absolutePath)
                 put("DEEPSEEK_API_KEY", model?.apiKey ?: "conformance-no-model")
                 if (model != null) put("DEEPSEEK_BASE_URL", model.baseUrl)

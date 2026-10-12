@@ -176,7 +176,7 @@ fun DetailsPanel(
                 )
 
                 SessionCard(
-                    session = current,
+                    session = current?.copy(cwd = com.labteto.dshmobile.core.session.effectiveWorkingDirectory(conversation?.projections, current.cwd)),
                     models = models,
                     presets = agentPresets,
                     onRename = { title ->

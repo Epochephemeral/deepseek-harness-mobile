@@ -95,7 +95,13 @@ data class PluginBundle(
     val error: PluginManagementError? = null,
     val rows: List<PluginBundleRow> = emptyList(),
     val overrides: List<String> = emptyList(),
+    val official: Boolean = false,
+    val availability: String? = null,
+    val installTarget: PluginInstallTarget? = null,
 )
+
+@Serializable
+data class PluginInstallTarget(val spec: String, val version: String)
 
 @Serializable
 data class ManagedPlugin(
@@ -129,6 +135,7 @@ data class PluginInstallOptions(
     val requestId: String,
     val approvedBuilds: List<String>? = null,
     val registry: String? = null,
+    val saveExact: Boolean? = null,
 )
 
 @Serializable

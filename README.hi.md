@@ -92,8 +92,7 @@ DSH Mobile [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 
 - Android 8.0+ (minSdk 26)।
 - एक चालू [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-  जिसका संस्करण `0.2.1-alpha.1` हो; यही DSH Mobile `0.14.0` के प्रोटोकॉल का आधार है
-  (`0.13.0` से अपरिवर्तित)।
+  जिसका संस्करण `0.2.1-alpha.2` हो; यही DSH Mobile `0.16.0` के प्रोटोकॉल का आधार है।
   `0.2.0-rc.1`, `0.1.7-rc.x` और `0.1.6-alpha.x` के साथ काम करने के लिए पुराने
   प्रोटोकॉल का समर्थन बना हुआ है; नई प्रबंधन सुविधाओं के लिए हार्नेस में उनका समर्थन होना चाहिए।
   इस प्रोटोकॉल आधार पर क्या जाँचा गया है, यह जानने के लिए [संगतता](docs/COMPATIBILITY.md) और

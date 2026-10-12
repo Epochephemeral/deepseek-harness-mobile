@@ -92,6 +92,8 @@ object EventClassification {
         "tool/ptc-dispatch-start",
         "web/deepseek-search-llm-request",
         "session/title-llm-request",
+        // Current directory is surfaced by the workingDirectory projection in session details.
+        "working-directory/change",
     )
 
     /**

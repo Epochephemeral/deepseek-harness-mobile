@@ -42,7 +42,10 @@ internal fun listedAgentPreset(
     asOfSeq: Int,
     topLevel: String?,
     projected: JsonElement?,
+    cached: Boolean = false,
 ): AgentPresetState? {
-    val incoming = topLevel?.let { AgentPresetState(asOfSeq, it) } ?: agentPresetUpdate(asOfSeq, projected)
+    // Persisted-cache watermarks cannot outrank even an empty live baseline (-1).
+    val seq = if (cached) Int.MIN_VALUE else asOfSeq
+    val incoming = topLevel?.let { AgentPresetState(seq, it) } ?: agentPresetUpdate(seq, projected)
     return if (incoming == null) held else newerAgentPreset(held, incoming)
 }

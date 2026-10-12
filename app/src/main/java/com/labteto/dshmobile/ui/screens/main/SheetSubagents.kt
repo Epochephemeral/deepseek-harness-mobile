@@ -213,13 +213,14 @@ private fun SubagentRow(entry: SubagentListEntry, selected: Boolean, onClick: ()
     val colors = DsTheme.colors
     val modeLabel = when (entry) {
         is SubagentListEntry.ChildOneShot -> stringResource(R.string.subagents_oneshot)
+        is SubagentListEntry.ChildExternal -> stringResource(R.string.alpha2_external)
         is SubagentListEntry.ChildContinuable -> stringResource(R.string.subagents_continuable)
         else -> null
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = entry !is SubagentListEntry.ChildExternal, onClick = onClick)
             .padding(vertical = DsSpacing.xsmall),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -25,9 +25,9 @@ class PinnedProtocolFixtureTest {
             ignorable = e["ignorable"]?.jsonPrimitive?.booleanOrNull)
     }
 
-    @Test fun theFixtureIsThePinnedCommit() {
-        assertEquals(DshCore.PROTOCOL_COMMIT, fixture.getValue("upstreamCommit").jsonPrimitive.content)
-        assertEquals(DshCore.PROTOCOL_BASELINE, fixture.getValue("release").jsonPrimitive.content)
+    @Test fun theFixtureRetainsItsHistoricalCommit() {
+        assertEquals("5badb15009ae1756c3afe0ae0cef1faafc290ccc", fixture.getValue("upstreamCommit").jsonPrimitive.content)
+        assertEquals("0.2.1-alpha.1", fixture.getValue("release").jsonPrimitive.content)
     }
 
     @Test fun workspaceBaselineCarriesArchiveAndPins() {

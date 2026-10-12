@@ -55,6 +55,18 @@ sealed class SubagentListEntry {
         override val kind: String get() = "child"
     }
 
+    /** External execution identity, without a local session to browse or continue. */
+    @Serializable
+    data class ChildExternal(
+        @SerialName("id") val id: String,
+        @SerialName("activity") val activity: String,
+        @SerialName("hasChildren") val hasChildren: Boolean = false,
+        @SerialName("mode") val mode: String = "external",
+        @SerialName("label") val label: String? = null,
+    ) : SubagentListEntry() {
+        override val kind: String get() = "child"
+    }
+
     /** A healthy continuable child (`kind: 'child'`, `mode: 'continuable'`). */
     @Serializable
     data class ChildContinuable(
@@ -98,6 +110,8 @@ object SubagentListEntrySerializer : KSerializer<SubagentListEntry> {
                 encodeToJsonElement(SubagentListEntry.ChildOneShot.serializer(), value).withKind(value.kind)
             is SubagentListEntry.ChildContinuable ->
                 encodeToJsonElement(SubagentListEntry.ChildContinuable.serializer(), value).withKind(value.kind)
+            is SubagentListEntry.ChildExternal ->
+                encodeToJsonElement(SubagentListEntry.ChildExternal.serializer(), value).withKind(value.kind)
             is SubagentListEntry.Diagnostic ->
                 encodeToJsonElement(SubagentListEntry.Diagnostic.serializer(), value).withKind(value.kind)
             is UnknownSubagentListEntry -> value.raw
@@ -113,6 +127,8 @@ object SubagentListEntrySerializer : KSerializer<SubagentListEntry> {
                 val mode = json["mode"]?.jsonPrimitive?.contentOrNull
                 if (mode == "continuable") {
                     decodeFromJsonElement(SubagentListEntry.ChildContinuable.serializer(), json)
+                } else if (mode == "external") {
+                    decodeFromJsonElement(SubagentListEntry.ChildExternal.serializer(), json)
                 } else {
                     decodeFromJsonElement(SubagentListEntry.ChildOneShot.serializer(), json)
                 }
@@ -143,7 +159,7 @@ private fun JsonElement.withKind(kind: String): JsonElement = JsonObject(
 data class SubagentCatalogEntry(
     @SerialName("id") val id: String,
     @SerialName("createdAt") val createdAt: Long = 0,
-    /** `one-shot`, `continuable`, or `unknown` for a child whose descriptor could not be read. */
+    /** `one-shot`, `continuable`, `external`, or `unknown`. External runs have no local transcript. */
     @SerialName("mode") val mode: String = "unknown",
     @SerialName("label") val label: String? = null,
 )
@@ -167,6 +183,7 @@ fun subagentEntriesFromCatalog(value: JsonElement?, running: (String) -> Boolean
             "continuable" -> SubagentListEntry.ChildContinuable(
                 id = entry.id, activity = activity, hasChildren = false, label = entry.label ?: entry.id,
             )
+            "external" -> SubagentListEntry.ChildExternal(id = entry.id, activity = activity, label = entry.label)
             "one-shot" -> SubagentListEntry.ChildOneShot(
                 id = entry.id, activity = activity, hasChildren = false, label = entry.label,
             )

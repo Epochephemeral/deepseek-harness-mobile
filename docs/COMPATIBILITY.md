@@ -6,6 +6,7 @@ DSH Mobile speaks the DeepSeek Harness web-client protocol over `/api`. The prot
 
 | DSH Mobile | Harness | Notes |
 |---|---|---|
+| 0.16.0 (unreleased) | 0.2.1-alpha.2 | All 14 real-host conformance scenarios passed across full and targeted runs; Android and signing gates in [validation](VALIDATION-0.16.0.md) |
 | 0.14.0 | 0.2.1-alpha.1 | Same protocol baseline as 0.13.0; the rewind picker needs dsh-rewind-plugin on the host |
 | 0.13.0 | 0.2.1-alpha.1 | Protocol baseline; real-host conformance and pre-UX Android E2E passed, including an older-host check on 0.2.0-rc.1; see [validation](VALIDATION-0.13.0.md) for final UX verification status |
 | 0.12.2 | 0.2.0-rc.1 | Nothing this client uses changed since 0.1.7-rc.2; 0.1.7-rc.x and 0.1.6-alpha.x hosts still work |

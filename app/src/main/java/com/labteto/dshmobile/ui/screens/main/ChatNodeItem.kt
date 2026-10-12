@@ -326,7 +326,7 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
                         streaming = streaming,
                     )
                     AnimatedVisibility(visible = expanded) {
-                        MarkdownText(block.text.orEmpty())
+                        ReasoningContent(block.text.orEmpty(), node.streaming)
                     }
                 }
                 // Show partial arguments until the durable tool card takes over. The list filter

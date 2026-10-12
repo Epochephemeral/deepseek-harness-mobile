@@ -133,6 +133,12 @@ fun highlightCode(code: String, lang: String?): List<List<SyntaxSpan>> {
 
     var inBlockComment = false
     return code.split("\n").map { line ->
+        // Minified/generated source should not allocate a styled span for every token.
+        // Reset lexical state across the skipped line rather than guessing its delimiters.
+        if (line.length > 10_000) {
+            inBlockComment = false
+            return@map listOf(SyntaxSpan(line, SyntaxToken.Plain))
+        }
         // HighlightLine reports where it ended up, which is where the next line starts.
         val (spans, endedInBlock) = highlightLine(
             line, keywords, caseInsensitive, lineComment, blockOpen, inBlockComment,

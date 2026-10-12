@@ -344,6 +344,10 @@ class DshApiClient(
     suspend fun sessionFork(request: SessionForkRequest): RpcResult<SessionForkValue> =
         callRequest("session/fork", request)
 
+    /** Read projections without activating or migrating a cold session. */
+    suspend fun sessionProjections(sessionId: String): RpcResult<SessionProjectionsValue?> =
+        callRequest("session/projections", SessionProjectionsRequest(sessionId))
+
     /**
      * `session/prompt` — sends text, temporary image bytes and staged file receipts to an
      * ordinary session agent.

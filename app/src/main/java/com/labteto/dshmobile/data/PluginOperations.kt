@@ -13,6 +13,7 @@ data class PluginOperationState(
     val phase: String? = null, val log: String = "", val result: PluginChangeResult? = null,
     val error: String? = null, val unknown: Boolean = false,
     val subject: String? = null, val registry: String? = null,
+    val enabled: Boolean = false, val saveExact: Boolean? = null,
 )
 
 /** App-scoped operation ownership: closing Settings never retries or silently cancels an install. */
@@ -47,7 +48,9 @@ class PluginOperations(
             PluginOperationState(host = row.getValue("host").jsonPrimitive.content,
                 requestId = row.getValue("requestId").jsonPrimitive.content, unknown = true,
                 subject = row["subject"]?.jsonPrimitive?.contentOrNull,
-                registry = row["registry"]?.jsonPrimitive?.contentOrNull)
+                registry = row["registry"]?.jsonPrimitive?.contentOrNull,
+                enabled = row["enabled"]?.jsonPrimitive?.booleanOrNull ?: false,
+                saveExact = row["saveExact"]?.jsonPrimitive?.booleanOrNull)
         }
         val host = prefs.getString("host", null) ?: return emptyList()
         val id = prefs.getString("requestId", null) ?: return emptyList()
@@ -58,6 +61,7 @@ class PluginOperations(
         val saved = buildJsonArray { _pending.value.forEach { state -> add(buildJsonObject {
             put("host", state.host); put("requestId", state.requestId)
             put("subject", state.subject); put("registry", state.registry)
+            put("enabled", state.enabled); put("saveExact", state.saveExact)
         }) } }
         preferences?.edit()?.putString("pending", saved.toString())?.remove("host")?.remove("requestId")?.apply()
     }
@@ -76,13 +80,15 @@ class PluginOperations(
     }
 
     @Synchronized
-    fun install(host: String, spec: String, registry: String?, approvedBuilds: List<String>? = null) {
+    fun install(host: String, spec: String, registry: String?, approvedBuilds: List<String>? = null,
+                enabled: Boolean = false, saveExact: Boolean? = null) {
         if (busy(host) || !available()) return
         val id = UUID.randomUUID().toString()
-        _pending.value += PluginOperationState(host, id, busy = true, subject = spec, registry = registry)
+        _pending.value += PluginOperationState(host, id, busy = true, subject = spec, registry = registry,
+            enabled = enabled, saveExact = saveExact)
         persistPending()
         launchAttempt(host, id) { version ->
-            try { finish(host, id, version, call(host) { it.installPlugin(spec, PluginInstallOptions(enabled = false, requestId = id, registry = registry, approvedBuilds = approvedBuilds)) }) }
+            try { finish(host, id, version, call(host) { it.installPlugin(spec, PluginInstallOptions(enabled = enabled, requestId = id, registry = registry, approvedBuilds = approvedBuilds, saveExact = saveExact)) }) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { revise(host, id, version) { it.copy(busy = false, unknown = true, error = e.message) } }
         }

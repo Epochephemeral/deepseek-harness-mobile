@@ -161,6 +161,7 @@ data class SessionRow(
     val agentPreset: String?,
     val updatedAt: Long,
     val pendingInteraction: String?, // "approval" | "plan-review" | "question" | null
+    val formatStatus: String? = null,
 )
 
 /** One renderable workspace row. */
@@ -321,6 +322,7 @@ class SessionStore @Inject constructor(
     private val lock = Any()
     private val baselineMutex = Mutex()
     private val noCurrentGoalMessage = { context.getString(com.labteto.dshmobile.R.string.goal_none) }
+    private val migrationRequiredMessage = { context.getString(com.labteto.dshmobile.R.string.alpha2_migration) }
     private val featureAvailability = FeatureAvailability { setConnectionError(it.message) }
     val automationAvailable = featureAvailability.state(HarnessFeature.AUTOMATION)
     val pluginManagementAvailable = featureAvailability.state(HarnessFeature.PLUGIN_MANAGEMENT)
@@ -1031,6 +1033,7 @@ class SessionStore @Inject constructor(
             asOfSeq = item.projections?.asOfSeq ?: -1,
             topLevel = item.agentPreset,
             projected = item.projections?.values?.get(AGENT_PRESET_PROJECTION),
+            cached = item.projections?.kind == "cached",
         ) ?: return null
         presetBySession[item.sessionId] = kept
         return kept.preset
@@ -1073,6 +1076,7 @@ class SessionStore @Inject constructor(
      * watermark.
      */
     private fun applyProjectionBaseline(sessionId: String, block: JsonObject) {
+        if (block["kind"]?.jsonPrimitive?.contentOrNull in setOf("cached", "migration-required")) return
         synchronized(lock) {
             if (sessionId != currentId) return@synchronized
             val asOf = block["asOfSeq"]?.jsonPrimitive?.intOrNull ?: 0
@@ -1231,6 +1235,7 @@ class SessionStore @Inject constructor(
                 origin = item.origin,
                 cwd = item.cwd,
                 agentPreset = preset,
+                formatStatus = item.formatStatus,
             ) ?: SessionRow(
                 sessionId = item.sessionId,
                 title = title,
@@ -1242,6 +1247,7 @@ class SessionStore @Inject constructor(
                 agentPreset = preset,
                 updatedAt = item.updatedAt,
                 pendingInteraction = null,
+                formatStatus = item.formatStatus,
             )
             if (existing == null) {
                 // New sessions appear at the front (most recent first).
@@ -1497,6 +1503,7 @@ class SessionStore @Inject constructor(
                             agentPreset = listedAgentPresetLocked(item),
                             updatedAt = item.updatedAt,
                             pendingInteraction = null,
+                            formatStatus = item.formatStatus,
                         )
                     }
                     emitSessionsLocked()
@@ -1835,9 +1842,9 @@ class SessionStore @Inject constructor(
 
     suspend fun forkSession(sessionId: String, atSeq: Long? = null) {
         val api = apiOrNull() ?: return
-        when (val r = api.sessionFork(SessionForkRequest(sessionId, atSeq?.toInt()))) {
+        when (val r = api.sessionFork(SessionForkRequest(sessionId, atSeq?.toInt(), allowMigration = false))) {
             is RpcResult.Ok -> refreshSessions()
-            is RpcResult.Err -> setConnectionError(r.error.message)
+            is RpcResult.Err -> setConnectionError(if (r.error.code == "session/migration-required") migrationRequiredMessage() else r.error.message)
         }
     }
 
@@ -2658,6 +2665,7 @@ class SessionStore @Inject constructor(
     }
 
     private fun subagentEntryId(entry: SubagentListEntry): String? = when (entry) {
+        is SubagentListEntry.ChildExternal -> entry.id
         is SubagentListEntry.ChildOneShot -> entry.id
         is SubagentListEntry.ChildContinuable -> entry.id
         is SubagentListEntry.Diagnostic -> entry.id

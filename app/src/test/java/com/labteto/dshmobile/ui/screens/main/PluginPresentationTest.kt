@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PluginPresentationTest {
+    @Test fun `catalog updates retain disabled selection and use the exact host target`() {
+        val bundle = com.labteto.dshmobile.core.wire.dto.PluginBundle("codex", enabled = false, installed = true,
+            availability = "profile", installTarget = com.labteto.dshmobile.core.wire.dto.PluginInstallTarget("codex@0.2.1-alpha.2", "0.2.1-alpha.2"))
+        val update = bundle.catalogInstall(bundle.enabled)!!
+        assertEquals("codex@0.2.1-alpha.2", update.target)
+        assertFalse(update.enabled)
+        assertEquals(true, update.saveExact)
+        val enable = bundle.catalogInstall(true)!!
+        val approval = PluginOperationState(subject = enable.target, enabled = enable.enabled, saveExact = enable.saveExact,
+            result = PluginChangeResult(false, "failed", "install", "codex", pendingBuilds = listOf("addon@1"))).approvalSubject()!!
+        assertTrue(approval.enabled)
+        assertEquals(true, approval.saveExact)
+        assertEquals(listOf("addon@1"), approval.approvedBuilds)
+        assertNull(bundle.copy(installTarget = com.labteto.dshmobile.core.wire.dto.PluginInstallTarget("link:/source", "dev")).catalogInstall(true)?.saveExact)
+    }
     @Test fun `approval captures operation package registry and scripts independently of form`() {
         val state = PluginOperationState(host = "host", requestId = "request", subject = "@scope/first@1", registry = "https://registry.example",
             result = PluginChangeResult(false, "failed", "install", "@scope/first", pendingBuilds = listOf("native-addon@2")))

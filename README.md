@@ -113,7 +113,7 @@ a [feature tour](https://github.com/sorsama/deepseek-harness-mobile/wiki/Feature
 
 - Android 8.0+ (minSdk 26).
 - A running [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-  at `0.2.1-alpha.1`, the protocol baseline for DSH Mobile `0.14.0` (unchanged since `0.13.0`).
+  at `0.2.1-alpha.2`, the protocol baseline for DSH Mobile `0.16.0`.
   Existing protocol fallbacks remain for `0.2.0-rc.1`, `0.1.7-rc.x` and `0.1.6-alpha.x`; new
   management features need host support. See [compatibility](docs/COMPATIBILITY.md) and the
   [0.13.0 validation status](docs/VALIDATION-0.13.0.md) for what has been checked on this baseline.

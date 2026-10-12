@@ -71,6 +71,7 @@ internal fun workflowMemberDot(status: String?): StateDotState = when (status) {
 // ---------------------------------------------------------------------------
 
 internal fun subagentId(entry: SubagentListEntry): String? = when (entry) {
+    is SubagentListEntry.ChildExternal -> entry.id
     is SubagentListEntry.ChildOneShot -> entry.id
     is SubagentListEntry.ChildContinuable -> entry.id
     is SubagentListEntry.Diagnostic -> entry.id
@@ -78,6 +79,7 @@ internal fun subagentId(entry: SubagentListEntry): String? = when (entry) {
 }
 
 internal fun subagentLabel(entry: SubagentListEntry): String? = when (entry) {
+    is SubagentListEntry.ChildExternal -> entry.label
     is SubagentListEntry.ChildOneShot -> entry.label
     is SubagentListEntry.ChildContinuable -> entry.label
     is SubagentListEntry.Diagnostic -> entry.reason
@@ -85,6 +87,7 @@ internal fun subagentLabel(entry: SubagentListEntry): String? = when (entry) {
 }
 
 internal fun subagentRunning(entry: SubagentListEntry): Boolean = when (entry) {
+    is SubagentListEntry.ChildExternal -> entry.activity == "running"
     is SubagentListEntry.ChildOneShot -> entry.activity == "running" || entry.activity == "active"
     is SubagentListEntry.ChildContinuable -> entry.activity == "running" || entry.activity == "active"
     else -> false

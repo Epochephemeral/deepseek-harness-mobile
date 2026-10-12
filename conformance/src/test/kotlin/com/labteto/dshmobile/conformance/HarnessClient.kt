@@ -29,6 +29,18 @@ class HarnessClient(harness: HarnessProcess, existingCookie: String? = null) : A
         // The mux is a long-lived socket; the harness pings it every two seconds and OkHttp answers
         // at the protocol layer, so no read deadline may apply to it.
         .pingInterval(0, TimeUnit.SECONDS)
+        .apply {
+            harness.tlsCertificate?.let { file ->
+                val certificate = file.inputStream().use { java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(it) }
+                val store = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType()).apply {
+                    load(null); setCertificateEntry("harness-test", certificate)
+                }
+                val factory = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+                val trust = factory.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>().single()
+                val ssl = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
+                sslSocketFactory(ssl.socketFactory, trust)
+            }
+        }
         .build()
 
     /** The browser-session cookie this client exchanged its launch token for. */

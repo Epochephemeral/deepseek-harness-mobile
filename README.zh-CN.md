@@ -87,7 +87,7 @@ harness，而不是对着一个敞开的端口。参见
 
 - Android 8.0 及以上（minSdk 26）。
 - 一个正在运行的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-  `0.2.1-alpha.1`，这是 DSH Mobile `0.14.0` 的协议基线（自 `0.13.0` 起未变）。
+  `0.2.1-alpha.2`，这是 DSH Mobile `0.16.0` 的协议基线。
   App 保留了对 `0.2.0-rc.1`、`0.1.7-rc.x` 和 `0.1.6-alpha.x` 的旧协议兼容处理；
   新增管理功能需要 harness 提供支持。已验证的范围请参见
   [兼容性说明](docs/COMPATIBILITY.md)和 [0.13.0 验证记录](docs/VALIDATION-0.13.0.md)。

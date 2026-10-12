@@ -4,10 +4,35 @@ What DSH Mobile speaks, in one page. Authoritative shapes live in the harness
 repository — `packages/api/*/src/types.ts`,
 `packages/api/gateway/src/stream-protocol.ts`, `packages/llm/llm/src/assistant-stream.ts`
 and `packages/client/file-upload/src/*` — and this document records the
-subset the app implements, against harness **0.2.1-alpha.1**. New management and
+subset the app implements, against harness **0.2.1-alpha.2**. New management and
 question surfaces are additive. Where 0.1.7 changed a shape the app still reads the
 0.1.6 one too; [0.12.0 contract additions](#0120-contract-additions-harness-017)
 lists both.
+
+## 0.16.0 contract additions (harness 0.2.1-alpha.2)
+
+Pinned source commit: `d743267388641bc76f17c45ce8b4c231aed1d32c`.
+
+- `session/projections` takes `{request:{sessionId}}` and can return null,
+  a sequenced `{kind,asOfSeq,values}` block, or unsequenced
+  `{kind:"migration-required",values}` hints. Migration hints are never live cuts.
+- Session summaries carry optional `formatStatus`; cached list projection watermarks
+  cannot override a live preset. Fork requests explicitly set `allowMigration:false`;
+  `session/migration-required` directs the user to open the original session first.
+- `workingDirectory` projects the current directory after a `working-directory/change`.
+  Chat tool paths and session details use it; the list retains the original project.
+- `subagentCatalog` supports `external` runs, which have no local transcript or prompt target.
+- Official plugin bundles expose `official`, `availability`, and `installTarget`.
+  Catalog installs use that target, `saveExact:true` except for `link:` sources, and
+  preserve the requested enabled state through build approval and recovery.
+- Optional `cotTranslation/limits` metadata gates explicit reasoning translation through
+  `cotTranslation/translate`. Requests identify session, provider and target language;
+  fragments respect the host's UTF-16 cap. The original remains available.
+- Native HTTPS uses the existing verified TLS transport, token exchange and cookie path.
+  See [host setup](../harness/README.md).
+
+The alpha.1 fixture remains historical regression coverage; alpha.2 examples live in
+`core/src/test/resources/protocol/d743267.json`.
 
 ## Envelopes
 

@@ -24,13 +24,21 @@ jobs:
           packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Restore signing keystore (optional)
+      - name: Restore required release signing keystore
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          fi
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required release signing secret: $name"
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          test -s "$RUNNER_TEMP/release.keystore"
 
       # The tag is the single source of the shipped version; see app/build.gradle.kts.
       - name: Derive version from tag
@@ -46,6 +54,16 @@ jobs:
           DSH_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           DSH_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Release lint
+        run: ./gradlew :app:lintRelease --stacktrace
+
+      - name: Verify release signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose "$APK"
 
       - name: Checksums
         run: |

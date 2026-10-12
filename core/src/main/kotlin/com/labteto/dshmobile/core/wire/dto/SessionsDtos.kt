@@ -34,6 +34,7 @@ data class SessionSummary(
     @SerialName("agentPreset") val agentPreset: String? = null,
     /** Projection baseline for this row; absent when no value is available. */
     @SerialName("projections") val projections: SessionProjectionsBlock? = null,
+    @SerialName("formatStatus") val formatStatus: String? = null,
 ) {
     /**
      * Effective agent preset: the top-level field when the host sends one, else
@@ -51,7 +52,25 @@ data class SessionProjectionsBlock(
     @SerialName("asOfSeq") val asOfSeq: Int,
     /** Whole current value per registered projection key. */
     @SerialName("values") val values: Map<String, JsonElement> = emptyMap(),
+    /** Cached watermarks belong to the stored log, not the connected host's sequence space. */
+    @SerialName("kind") val kind: String? = null,
 )
+
+/** Alpha.2 cold reads may return migration hints without a comparable event cut. */
+@Serializable
+data class SessionProjectionsValue(
+    @SerialName("kind") val kind: String? = null,
+    @SerialName("asOfSeq") val asOfSeq: Int? = null,
+    @SerialName("values") val values: Map<String, JsonElement> = emptyMap(),
+) {
+    val requiresMigration: Boolean get() = kind == "migration-required"
+    val sequenced: SessionProjectionsBlock?
+        get() = asOfSeq?.takeIf { !requiresMigration && (kind == null || kind == "sequenced") }
+            ?.let { SessionProjectionsBlock(it, values, kind) }
+}
+
+@Serializable
+data class SessionProjectionsRequest(@SerialName("sessionId") val sessionId: String)
 
 /**
  * The `modelSelection` projection: what this session last used, and what it will use next.
@@ -233,6 +252,7 @@ data class SessionRenameRequest(
 data class SessionForkRequest(
     @SerialName("sessionId") val sessionId: String,
     @SerialName("atSeq") val atSeq: Int? = null,
+    @SerialName("allowMigration") val allowMigration: Boolean? = null,
 )
 
 /** Request payload of `session.models`. */

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.0 (unreleased)
+
+- Target DeepSeek Harness 0.2.1-alpha.2.
+- Use the current session working directory for tool paths and session details.
+- Respect cached projection sequence boundaries and explain migration-required forks.
+- Display external subagent executions without offering a nonexistent local transcript.
+- Install official plugin catalog targets and preserve their enabled state during recovery.
+- Translate completed reasoning on demand when the host's experimental translation plugin is available.
+- Keep oversized generated code lines readable without expensive token highlighting.
+- Document native LAN binds and HTTPS; require signed APKs in release publication.
+
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 

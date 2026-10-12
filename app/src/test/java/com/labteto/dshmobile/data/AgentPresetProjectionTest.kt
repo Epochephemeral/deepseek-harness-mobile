@@ -14,6 +14,13 @@ import org.junit.Test
  * an answer that reflects an older log position must not undo a live update.
  */
 class AgentPresetProjectionTest {
+    @Test fun `cached high watermarks cannot undo a lower live preset after migration`() {
+        val live = AgentPresetState(-1, "minimal")
+        assertEquals(live, listedAgentPreset(live, 900, null, JsonPrimitive("standard"), cached = true))
+        val cached = listedAgentPreset(null, 900, null, JsonPrimitive("standard"), cached = true)
+        assertEquals("standard", cached?.preset)
+        assertEquals(live, newerAgentPreset(cached, live))
+    }
 
     @Test
     fun `a string is a preset`() {

@@ -148,7 +148,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
         if (loaded && matching.isEmpty() && standalone.isEmpty()) EmptyHero(
             stringResource(if (search.isBlank()) R.string.plugins_empty else R.string.harness_automation_no_matches), null, showPreview = false)
         listOf(true, false).forEach { installed ->
-            val group = matching.filter { it.installed == installed }
+            val group = matching.filter { (it.availability?.let { location -> location != "missing" } ?: it.installed) == installed }
             if (group.isNotEmpty() || installed && standalone.isNotEmpty()) SectionHeader(stringResource(if (installed) R.string.ux_a_installed else R.string.ux_a_available))
             if (installed) standalone.forEach { plugin -> DsCard { PluginToggle(plugin) } }
             group.forEach { bundle -> DsCard {
@@ -157,7 +157,10 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
                 bundle.description?.let { Text(it, style = DsType.std14, color = DsTheme.colors.labelSecondary) }
                 bundle.error?.let { Text(stringResource(pluginReason(it.code)), color = DsTheme.colors.error, style = DsType.small13); FeatureDiagnostics(it.diagnostic) }
                 ToggleRow(technicalDisplay(bundle.name), bundle.enabled, bundle.readOnlyReason?.let { stringResource(pluginReason(it)) },
-                    enabled = !busy && bundle.readOnlyReason == null) { run { api ->
+                    enabled = !busy && bundle.readOnlyReason == null) {
+                    if (!bundle.enabled && bundle.availability == "missing" && bundle.installTarget != null) {
+                        confirm = bundle.catalogInstall(enabled = true)
+                    } else run { api ->
                     val result = store.featureCall(HarnessFeature.PLUGIN_MANAGEMENT, api) { api.setBundleEnabled(bundle.name, !bundle.enabled) }.featureValue()
                     if (host != null) store.pluginOperations.changed(host, result); revision++
                 } }
@@ -166,8 +169,10 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
                     if (plugin != null) PluginToggle(plugin)
                     else Text(technicalDisplay(row.moduleName), style = DsType.small13, color = DsTheme.colors.labelSecondary)
                 }
-                if (bundle.installed) FeatureAction(stringResource(R.string.ux_a_update), !busy) {
-                    spec = bundle.source ?: bundle.name; registry = ""; inspection = null; installedVersion = bundle.version; installOpen = true
+                 if (bundle.availability != "installation" && (bundle.installed || bundle.installTarget != null)) FeatureAction(stringResource(if (bundle.availability == "missing") R.string.harness_install_update else R.string.ux_a_update), !busy) {
+                    val catalog = bundle.catalogInstall(enabled = bundle.enabled)
+                    if (catalog != null) confirm = catalog
+                    else { spec = bundle.source ?: bundle.name; registry = ""; inspection = null; installedVersion = bundle.version; installOpen = true }
                 }
                 if (bundle.removable && bundle.readOnlyReason == null) FeatureAction(stringResource(R.string.common_remove), !busy) { remove = bundle }
             } }
@@ -204,7 +209,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
         }
         FeatureAction(stringResource(if (subject.approvedBuilds == null) R.string.harness_install_update else R.string.ux_a_approve_retry), variant = DsButtonVariant.Primary) {
             confirm = null; installOpen = false; operationOpen = true
-            if (host != null) store.pluginOperations.install(host, subject.target, subject.registry, subject.approvedBuilds)
+            if (host != null) store.pluginOperations.install(host, subject.target, subject.registry, subject.approvedBuilds, subject.enabled, subject.saveExact)
         }
         FeatureAction(stringResource(R.string.common_cancel)) { confirm = null }
     } }
