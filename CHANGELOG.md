@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.16.0 (unreleased)
+All notable changes to DSH Mobile are documented here. Format based on
+[Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
+
+## [0.16.0] - 2026-10-12
 
 - Target DeepSeek Harness 0.2.1-alpha.2.
 - Use the current session working directory for tool paths and session details.
@@ -10,9 +13,8 @@
 - Translate completed reasoning on demand when the host's experimental translation plugin is available.
 - Keep oversized generated code lines readable without expensive token highlighting.
 - Document native LAN binds and HTTPS; require signed APKs in release publication.
-
-All notable changes to DSH Mobile are documented here. Format based on
-[Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
+- Include the latest compact transcript and tool-image improvements from #54.
+- Include on-phone Harness setup and Termux permission/runtime improvements from #55.
 
 ## [0.15.0] - 2026-10-09
 

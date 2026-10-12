@@ -13,6 +13,13 @@
 
 ## Evidence so far
 
+Before publication, merged remote main through `a10c80c` (including 0.15.0,
+compact transcripts and Termux support). Reasoning translation now renders inside
+the compact thinking panel. Full post-merge validation passed in one run:
+core and mock tests, debug/release app unit tests, debug/release lint, release
+assembly, all 30 Android instrumentation tests (zero failures/skips), and all
+14 real-host conformance tests. Earlier totals below describe the pre-merge code.
+
 The first mobile test run exposed a historical fixture assertion that incorrectly
 equated the alpha.1 fixture to the current baseline. The assertion now checks its
 original commit; the new alpha.2 fixture separately checks the current pin.
@@ -52,8 +59,9 @@ Pre-correction build metadata confirms `versionName=0.15.0`, `versionCode=1500` 
 No local release-signing environment variables are configured. An unsigned release
 build does not establish installability or upgrade compatibility with the published
 app. Signed artifact verification and a signed upgrade installation remain required.
-The release workflow now requires all signing secrets and verifies the APK signature
-before publication.
+The release workflow now requires all signing secrets and verifies the APK signature.
+GitHub has the four required signing secrets configured. It uploads a draft release
+so the signed artifact can be upgrade-tested before publication.
 
 ## Scope
 
