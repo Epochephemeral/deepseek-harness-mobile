@@ -3,6 +3,15 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased]
+
+### Fixed
+
+- Follow the tail while a reply is still arriving. A row inserted below the newest one — a tool
+  card, the next message segment, a question card, the turn's final message — stayed one scroll
+  past the bottom edge until the reader dragged it in. Following resumes once the reader is back
+  at the bottom, and a transcript reopened mid-history is left where it was.
+
 ## [0.16.0] - 2026-10-12
 
 - Target DeepSeek Harness 0.2.1-alpha.2.
