@@ -143,10 +143,9 @@ internal fun ChatTranscript(
     // that follows one, both of which `isScrollInProgress` covers — moves the reader on purpose, so
     // where the list comes to rest at the end of one is the whole of the signal.
     //
-    // Primed from the position rather than left at its default: the list state is hoisted, so
-    // coming back to the Chat tab after a detour through Trajectory restores it mid-history while
-    // this composition starts over — a flag that began at true would then pin the tail under a
-    // reader who had scrolled away.
+    // Primed from the position rather than assumed: the list state is hoisted above the tab swap
+    // and outlives this composition. Today the session-open scroll above lands every new
+    // composition on the tail anyway, so this only matters if that scroll ever stops doing so.
     fun atTail(): Boolean =
         listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
     var followTail by remember(sessionId) { mutableStateOf(true) }

@@ -7,10 +7,10 @@ All notable changes to DSH Mobile are documented here. Format based on
 
 ### Fixed
 
-- Follow the tail while a reply is still arriving. A row inserted below the newest one — a tool
-  card, the next message segment, a question card, the turn's final message — stayed one scroll
-  past the bottom edge until the reader dragged it in. Following resumes once the reader is back
-  at the bottom, and a transcript reopened mid-history is left where it was.
+- The transcript now keeps up with a reply that adds rows. A tool card, the next message segment,
+  a question card or the turn's final message used to land just below the bottom edge and stay
+  there until you dragged it into view. If you scroll up to read, the view stays where you left
+  it, and it follows again once you're back at the bottom.
 
 ## [0.16.0] - 2026-10-12
 
