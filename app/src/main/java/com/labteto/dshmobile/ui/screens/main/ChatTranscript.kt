@@ -117,13 +117,51 @@ internal fun ChatTranscript(
 
     // Opening a session lands on its newest message. In reverse layout that is index 0, which is
     // also where the list starts, so this only has to undo a position inherited from the session
-    // that was open before. Nothing else scrolls the transcript any more: following the tail costs
-    // no scroll, which is the point of the reversal.
+    // that was open before. Following the tail is handled just below, where the anchoring the
+    // reversal buys is overridden only when it would otherwise cost the reader the newest row.
     var lastSession by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(sessionId) {
         if (sessionId == lastSession) return@LaunchedEffect
         lastSession = sessionId
         if (itemCount > 0) listState.scrollToItem(0)
+    }
+
+    // Following the tail is free only while the tail is one growing row. The layout keeps the first
+    // visible *key* anchored, and in a reversed list that key is the bottom row: insert a row below
+    // it — a tool card, the next message segment, a question card, the reader's own message — and
+    // the new row takes index 0 while the viewport holds the old bottom row exactly where it was,
+    // leaving the arrival one scroll past the edge. Nothing animated it into place either, so the
+    // reader watching a reply arrives at a dead screen until they drag.
+    //
+    // Pin index 0 again while the reader is at the bottom. `requestScrollToItem` is the one call
+    // that overrides the key anchoring for the coming measure; it is instant and schedules no
+    // animation, so it cannot race the next delta the way a per-frame scroll would.
+    //
+    // Following is intent, not position: the anchoring above moves the first visible index to 1 on
+    // its own when a row lands below, and reading that as "the reader scrolled away" would switch
+    // following off at the exact moment it is needed. Only a scroll session — a drag, or the fling
+    // that follows one, both of which `isScrollInProgress` covers — moves the reader on purpose, so
+    // where the list comes to rest at the end of one is the whole of the signal.
+    //
+    // Primed from the position rather than assumed: the list state is hoisted above the tab swap
+    // and outlives this composition. Today the session-open scroll above lands every new
+    // composition on the tail anyway, so this only matters if that scroll ever stops doing so.
+    fun atTail(): Boolean =
+        listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+    var followTail by remember(sessionId) { mutableStateOf(true) }
+    LaunchedEffect(listState, sessionId) {
+        followTail = atTail()
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (scrolling) return@collect
+            followTail = atTail()
+        }
+    }
+    LaunchedEffect(itemCount, followTail) {
+        // itemCount rather than the rows themselves: a delta changes the text of a row, not how
+        // many rows there are, and only the arrival of a row can land the tail out of view.
+        if (followTail && itemCount > 0 && !listState.isScrollInProgress) {
+            listState.requestScrollToItem(0)
+        }
     }
 
     // Reaching the oldest loaded message pulls the next page. The guard matters: this effect sits

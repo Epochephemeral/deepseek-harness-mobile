@@ -3,6 +3,15 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased]
+
+### Fixed
+
+- The transcript now keeps up with a reply that adds rows. A tool card, the next message segment,
+  a question card or the turn's final message used to land just below the bottom edge and stay
+  there until you dragged it into view. If you scroll up to read, the view stays where you left
+  it, and it follows again once you're back at the bottom.
+
 ## [0.16.0] - 2026-10-12
 
 - Target DeepSeek Harness 0.2.1-alpha.2.

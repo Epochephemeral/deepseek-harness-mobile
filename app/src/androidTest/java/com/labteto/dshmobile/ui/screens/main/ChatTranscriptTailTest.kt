@@ -79,6 +79,30 @@ class ChatTranscriptTailTest {
         return h
     }
 
+    private fun Harness.atTail(): Boolean = compose.runOnIdle {
+        listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+    }
+
+    private fun Harness.firstVisibleKey(): Any? =
+        compose.runOnIdle { listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key }
+
+    // By hand rather than through scrollToItem: following only changes its mind at the end of a
+    // scroll session, and a programmatic scroll can open and close one inside a single frame.
+    // In reverse layout a downward drag pulls older rows into view.
+    private fun scrollBackByHand() {
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() }
+        compose.waitForIdle()
+    }
+
+    private fun Harness.returnToTheBottomByHand() {
+        repeat(10) {
+            if (atTail()) return
+            compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() }
+            compose.waitForIdle()
+        }
+        assertTrue("never got back to the bottom", atTail())
+    }
+
     @Test
     fun opensOnTheNewestMessageWithoutScrolling() {
         val h = harness(longHistory())
@@ -133,6 +157,57 @@ class ChatTranscriptTailTest {
         // The tail grew off-screen below; nothing the reader is looking at moved. There is no
         // freeze-and-catch-up here because reverse layout makes one unnecessary.
         compose.runOnIdle { assertEquals(anchor, h.listState.firstVisibleItemIndex) }
+    }
+
+    @Test
+    fun aRowArrivingBelowTheTailIsPinnedIntoView() {
+        // Issue #56. The tail stops being one growing row whenever a turn adds a row under it: a
+        // settled message, then a tool card or the next segment. The layout anchors the previous
+        // bottom row by key, so without a correction each arrival lands one row past the edge.
+        val history = longHistory()
+        val h = harness(history)
+
+        val arrivals = listOf(
+            assistant(60, "a settled reply"),
+            user(61, "a follow-up question"),
+            assistant(1000, "the next segment, still streaming", streaming = true),
+        )
+        arrivals.indices.forEach { i ->
+            compose.runOnIdle { h.nodes = history + arrivals.take(i + 1) }
+            compose.waitForIdle()
+            assertTrue("row ${i + 1} landed out of view", h.atTail())
+        }
+        compose.onNodeWithText("the next segment, still streaming").assertIsDisplayed()
+    }
+
+    @Test
+    fun aRowArrivingWhileTheReaderIsInHistoryLeavesThemThere() {
+        val history = longHistory()
+        val h = harness(history)
+        scrollBackByHand()
+        assertFalse(h.atTail())
+        val anchor = h.firstVisibleKey()
+
+        compose.runOnIdle { h.nodes = history + assistant(60, "a reply nobody is watching") }
+        compose.waitForIdle()
+
+        // Following is off, so the key anchoring is left alone and nothing the reader sees moves.
+        assertEquals(anchor, h.firstVisibleKey())
+        assertFalse(h.atTail())
+    }
+
+    @Test
+    fun followingResumesOnceTheReaderIsBackAtTheBottom() {
+        val history = longHistory()
+        val h = harness(history)
+        scrollBackByHand()
+        h.returnToTheBottomByHand()
+
+        compose.runOnIdle { h.nodes = history + assistant(60, "a reply after the round trip") }
+        compose.waitForIdle()
+
+        assertTrue(h.atTail())
+        compose.onNodeWithText("a reply after the round trip").assertIsDisplayed()
     }
 
     @Test
