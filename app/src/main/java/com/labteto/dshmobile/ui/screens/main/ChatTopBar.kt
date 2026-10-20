@@ -76,12 +76,15 @@ internal fun ChatTopBar(
     tab: ChatTab,
     onOpenDrawer: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenPresets: () -> Unit,
     onOpenSubagents: () -> Unit,
     onOpenDetails: () -> Unit,
     onTabChange: (ChatTab) -> Unit,
     onOpenWorkspace: () -> Unit,
     workspaceEnabled: Boolean,
+    /** False while no session is open, where there is no history to pick from yet. */
+    historyEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = DsTheme.colors
@@ -101,6 +104,18 @@ internal fun ChatTopBar(
                 iconSize = 18.dp,
             )
             ModelChip(models = models, onClick = onOpenModels, modifier = Modifier.weight(1f, fill = false))
+            // Beside the model chip rather than next to the info button: both answer "what is this
+            // session doing", and a fixed position lets the thumb learn it instead of hunting a
+            // gap that the growing model label keeps moving.
+            if (historyEnabled) {
+                DsIconButton(
+                    icon = FeatherIcons.List,
+                    contentDescription = stringResource(R.string.chat_history_title),
+                    onClick = onOpenHistory,
+                    tint = colors.labelSecondary,
+                    iconSize = 18.dp,
+                )
+            }
             Spacer(Modifier.weight(1f))
             StateDot(if (running) StateDotState.Running else StateDotState.Idle)
             if (!detailsOpen) {

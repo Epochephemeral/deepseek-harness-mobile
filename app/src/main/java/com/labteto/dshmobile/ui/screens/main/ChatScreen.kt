@@ -138,6 +138,10 @@ fun ChatScreen(
     var panelKey by remember { mutableStateOf<ComposerKey?>(null) }
     var feedback by remember { mutableStateOf<Triple<ComposerKey, String, Boolean>?>(null) }
     var sheet by remember { mutableStateOf<ChatSheet?>(null) }
+    // A message chosen from the history sheet, waiting for the transcript to scroll to it. Held
+    // here rather than inside the transcript because the pick is made in a sheet that outlives no
+    // layout of its own, and it has to survive the sheet closing.
+    var pendingJumpSeq by remember { mutableStateOf<Long?>(null) }
     // A decorated command's picker (the phone's `popupSelect`), keyed by the command it serves.
     var popup by remember(composer.key) { mutableStateOf<Pair<String, CommandUiSpec.PopupSelect>?>(null) }
 
@@ -441,6 +445,7 @@ fun ChatScreen(
                 tab = tab,
                 onOpenDrawer = onOpenDrawer,
                 onOpenModels = { sheet = ChatSheet.Models },
+                onOpenHistory = { sheet = ChatSheet.History },
                 onOpenPresets = {
                     scope.launch { store.refreshAgentPresets() }
                     sheet = ChatSheet.Presets
@@ -450,6 +455,7 @@ fun ChatScreen(
                 onTabChange = { tab = it },
                 onOpenWorkspace = { panelKey = composer.key },
                 workspaceEnabled = currentSessionId != null,
+                historyEnabled = currentSessionId != null,
             )
 
             connectionError?.let {
@@ -502,6 +508,8 @@ fun ChatScreen(
                             context = nodeContext,
                             listState = chatListState,
                             onLoadOlder = { scope.launch { store.loadOlder() } },
+                            jumpToSeq = pendingJumpSeq,
+                            onJumpConsumed = { pendingJumpSeq = null },
                         )
                         ChatTab.Trajectory -> TrajectoryTab(
                             conversation = conversation,
@@ -722,6 +730,21 @@ fun ChatScreen(
             onDismiss = { sheet = null },
         )
         ChatSheet.Models -> ModelsSheet(models = models, store = store, onDismiss = { sheet = null })
+        ChatSheet.History -> HistorySheet(
+            entries = historyEntries(
+                nodes = conversation?.nodes.orEmpty(),
+                running = conversation?.running == true,
+                eventTimes = conversation?.journal?.associate { it.seq to it.time }.orEmpty(),
+            ),
+            onPick = { seq ->
+                // Closing first: the scroll happens on the transcript's next composition, and
+                // leaving the sheet over it would hide the very message the pick was for.
+                pendingJumpSeq = seq
+                sheet = null
+                tab = ChatTab.Chat
+            },
+            onDismiss = { sheet = null },
+        )
         ChatSheet.Presets -> PresetsSheet(
             presets = agentPresets,
             currentPreset = currentSession?.agentPreset,
@@ -741,7 +764,7 @@ fun ChatScreen(
 }
 
 /** Which sheet, if any, is open over the chat surface. */
-private enum class ChatSheet { Commands, Models, Presets, Subagents }
+private enum class ChatSheet { Commands, Models, History, Presets, Subagents }
 
 /**
  * A picked document's display name and size, as its provider reports them.

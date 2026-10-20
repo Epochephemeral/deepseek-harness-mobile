@@ -101,6 +101,9 @@ internal fun ChatTranscript(
     context: ChatNodeContext,
     listState: LazyListState,
     onLoadOlder: () -> Unit,
+    /** A message the reader picked out of the history sheet, still waiting to be scrolled to. */
+    jumpToSeq: Long? = null,
+    onJumpConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Only the nodes that draw something: a zero-height item still costs its 4dp gap, and a turn's
@@ -164,6 +167,9 @@ internal fun ChatTranscript(
         }
     }
 
+    // A pick from the history sheet, handled below once paging state is known: a pick older than
+    // the loaded page has to ask for the next one.
+
     // Reaching the oldest loaded message pulls the next page. The guard matters: this effect sits
     // above the `loading` early return, so without it the trigger would fire against an empty list
     // and race the initial history fetch. It also re-arms once a page lands, which is what fills
@@ -215,6 +221,32 @@ internal fun ChatTranscript(
             }
             onLoadOlder()
         }
+    }
+
+    // A pick from the history sheet. The sheet knows only sequences; which row index a sequence owns
+    // is decided by the grouping above, so the lookup happens here rather than there.
+    //
+    // `requestScrollToItem` rather than the suspend `scrollToItem`: the target is usually far off
+    // screen and therefore unmeasured, and a pick is a jump, not a journey — animating a hundred
+    // screens of rows would burn frames to show the reader nothing they asked to see.
+    //
+    // Following the tail is switched off first, or the next row a running reply adds would pin the
+    // tail back under a reader who deliberately left it. Picking the tail itself keeps it on.
+    LaunchedEffect(jumpToSeq, rows.size, canPage) {
+        val seq = jumpToSeq ?: return@LaunchedEffect
+        val index = historyRowIndex(rows, seq)
+        if (index == null) {
+            // Older than the page that is loaded. Fetching it is not a failure to report: the effect
+            // re-runs on the row-count change and retries the lookup, so a pick a thousand messages
+            // back lands without the reader watching anything happen. Once paging is exhausted the
+            // pick cannot be honoured at all — consuming it stops it from firing again on the next
+            // unrelated change.
+            if (canPage) onLoadOlder() else onJumpConsumed()
+            return@LaunchedEffect
+        }
+        followTail = index == 0
+        listState.requestScrollToItem(index)
+        onJumpConsumed()
     }
 
     if (loading) {

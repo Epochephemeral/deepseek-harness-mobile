@@ -607,4 +607,8 @@
     <string name="update_copy_command">Copiar comando de instalação</string>
     <string name="update_install_started">Baixando no Termux. O instalador abre ao terminar.</string>
     <string name="update_install_failed">O Termux não conseguiu instalar a atualização (%1$s).</string>
+    <string name="chat_history_title">Histórico</string>
+    <string name="chat_history_empty">Nenhuma mensagem enviada ainda.</string>
+    <string name="chat_history_no_match">Nenhuma mensagem corresponde.</string>
+    <string name="chat_history_image">Imagem</string>
 </resources>

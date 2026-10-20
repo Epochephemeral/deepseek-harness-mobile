@@ -607,4 +607,8 @@
     <string name="update_copy_command">इंस्टॉल कमांड कॉपी करें</string>
     <string name="update_install_started">Termux में डाउनलोड हो रहा है। पूरा होने पर इंस्टॉलर खुलेगा।</string>
     <string name="update_install_failed">Termux अपडेट इंस्टॉल नहीं कर सका (%1$s)।</string>
+    <string name="chat_history_title">इतिहास</string>
+    <string name="chat_history_empty">अभी तक कोई संदेश नहीं भेजा गया।</string>
+    <string name="chat_history_no_match">कोई संदेश मेल नहीं खाता।</string>
+    <string name="chat_history_image">छवि</string>
 </resources>

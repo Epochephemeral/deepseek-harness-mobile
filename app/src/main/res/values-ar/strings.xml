@@ -607,4 +607,8 @@
     <string name="update_copy_command">نسخ أمر التثبيت</string>
     <string name="update_install_started">جارٍ التنزيل في Termux. سيُفتح المثبّت عند الانتهاء.</string>
     <string name="update_install_failed">تعذّر على Termux تثبيت التحديث (%1$s).</string>
+    <string name="chat_history_title">السجل</string>
+    <string name="chat_history_empty">لا مطالبات بعد.</string>
+    <string name="chat_history_no_match">لا توجد رسائل مطابقة.</string>
+    <string name="chat_history_image">صورة</string>
 </resources>
