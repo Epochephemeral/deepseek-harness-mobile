@@ -1,13 +1,11 @@
 <p align="center">
-  <img src="docs/images/banner.jpg" alt="DSH Mobile — 装进口袋的 DeepSeek Harness" width="100%">
+  <img src="docs/images/banner.jpg" alt="DSH Mobile，手机上的 DeepSeek Harness" width="100%">
 </p>
 
-<h1 align="center">DSH Mobile — DeepSeek Harness 远程端</h1>
+<h1 align="center">DSH Mobile</h1>
 
 <p align="center">
-  一款开源的 Android 伴侣应用，把你的 <b>DeepSeek Harness</b> 装进口袋。<br>
-  在局域网内用手机驱动会话、查看计划与目标、回应审批与提问，
-  并在 harness 干完活时收到通知。
+  一款 Android 应用，让你在手机上操控 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>。
 </p>
 
 <p align="center">
@@ -27,143 +25,117 @@
   <a href="README.th.md">ไทย</a>
 </p>
 
-DSH Mobile 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）的
-**非官方伴侣应用**，用 harness 自己的视觉语言逐项还原它的网页 GUI。仅支持 Android，使用
-Kotlin + Jetpack Compose。
+DeepSeek Harness 是一个运行在你电脑上的 AI 编程代理，自带网页界面。DSH Mobile 连接到这个 harness，把同样的操作搬进原生 Android 应用。你可以在电脑前开始一个任务，然后在手机上跟进进度、回答它的提问、批准它要执行的命令。
 
-另一端的搭档是 [**dsh-relay**](https://github.com/sorsama/deepseek-harness-relay) —— 一个 harness
-插件，补上 harness 自己承认缺失的那层身份验证，让这个应用能凭真正的凭据和固定的密钥去连接
-harness，而不是对着一个敞开的端口。参见
-[Relay](https://github.com/sorsama/deepseek-harness-mobile/wiki/Relay)。
+这是一个非官方的社区应用。它需要连上一个正在运行的 harness：可以在你的电脑上，也可以通过 Termux 跑在手机本身。
 
-**[dshm.zyphite.com](https://dshm.zyphite.com)** 是项目主页 —— 一页讲清这个应用是什么、
-长什么样、怎么跑起来。
-
-[**wiki**](https://github.com/sorsama/deepseek-harness-mobile/wiki) 是面向用户的指南：
-[入门](https://github.com/sorsama/deepseek-harness-mobile/wiki/Getting-Started)、
-[连接](https://github.com/sorsama/deepseek-harness-mobile/wiki/Connecting)、
-[疑难解答](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting)、
-[功能巡览](https://github.com/sorsama/deepseek-harness-mobile/wiki/Feature-Tour) 和
-[常见问题](https://github.com/sorsama/deepseek-harness-mobile/wiki/FAQ)。
-
----
+[项目主页](https://dshm.zyphite.com)用一页做了概览，完整的用户指南在 [wiki](https://github.com/sorsama/deepseek-harness-mobile/wiki)。
 
 ## 截图
 
-| 连接 | 聊天 | 轨迹 |
+| 连接 | 对话 | 轨迹 | 详情 |
+|:--:|:--:|:--:|:--:|
+| <img src="docs/images/home.png" width="200" alt="连接界面，地址栏里粘贴了一条 dsh web 链接"> | <img src="docs/images/chat.png" width="200" alt="回复正在流式输出，顶栏显示“运行中”，停止按钮可见"> | <img src="docs/images/trajectory.png" width="200" alt="轨迹标签页，列出第一个回合的每一次工具调用"> | <img src="docs/images/session-info.png" width="200" alt="详情面板，显示会话及其模型、上下文用量和活动"> |
+| 粘贴 harness 打印出的链接，就能连接并登录。 | 回复实时流式显示。工具调用折叠成一行，点开即可查看。 | 每一次工具调用，按回合排列。 | 会话的模型、上下文、目标、计划模式和后台任务。 |
+
+| 子代理 | 终端 | 深色主题 |
 |:--:|:--:|:--:|
-| <img src="docs/images/home.png" width="240" alt="连接界面：最近使用的 harness 及其实时可达性、发现、手动输入与自动连接开关"> | <img src="docs/images/chat.png" width="240" alt="聊天：流式输出的回合、每种工具的图标、工具卡片、目标停靠栏与输入框"> | <img src="docs/images/trajectory.png" width="240" alt="轨迹：按回合排列的账本，附带用量合计"> |
-| 最近使用的 harness 及实时可达性、局域网发现、手动 `host:port`、自动连接。 | 流式输出的回合、每种工具一个字形、可展开的工具卡片、权限选择器。 | 同一个会话，以按回合排列的账本呈现，并给出用量合计。 |
+| <img src="docs/images/subagent.png" width="200" alt="子代理的对话记录，包含它的发现，下方是发送追问的输入框"> | <img src="docs/images/terminal.png" width="200" alt="harness 电脑上的终端，显示一次全部通过的测试运行"> | <img src="docs/images/dark.png" width="200" alt="深色主题下的对话"> |
+| 查看子代理做了什么，并给它发一条追问。 | harness 电脑上一个真正的 shell。 | 浅色、深色或跟随系统。 |
 
-| 会话详情 | 子代理 |
-|:--:|:--:|
-| <img src="docs/images/session-info.png" width="240" alt="详情面板：上下文构成、目标、计划模式、任务、队列、子代理、主机信息"> | <img src="docs/images/subagent.png" width="240" alt="子代理目录，可继续与子代理对话"> |
-| 上下文构成、目标、计划模式、后台任务、排队的回合、主机信息、会话日志导出。 | 子代理目录 —— 打开子代理的对话记录、追问，或将其中断。 |
+## 能做什么
 
-## 功能
+- 和代理对话。回复会连同推理过程、代码块和工具调用一起流式显示。你可以附加照片和文件，用 `@` 引用文件，用 `/` 运行命令和技能。
+- 处理代理需要你做的事：批准或拒绝一条命令，回答它的提问，在计划开始执行前先审阅。
+- 盯住耗时较长的工作。目标、待办列表、排队的消息、后台任务和子代理各有自己的视图，你可以暂停、引导或停止它们。
+- 回合结束、目标完成或受阻、代理在等你回答时，都会收到通知。连接会在后台保持。
+- 浏览和预览工作区里的文件，在 harness 电脑上打开终端。
+- 管理 harness 本身：模型、代理预设、插件、定时任务和已归档的会话。
+- 应用界面支持英语、中文、印地语、西班牙语、法语、阿拉伯语、孟加拉语、葡萄牙语、俄语、乌尔都语和泰语，也支持从右到左书写的语言。
 
-- **轻松连接** —— 自动发现同一 Wi-Fi 下的 harness（主动子网扫描 + 就绪握手），
-  记住用过的主机并在进入时探测其存活状态，支持手动输入 `host:port`、同设备回环连接，
-  以及自动连接开关（上次使用 / 局域网 / 同一设备）。
-- **Discord 式导航** —— 从屏幕左缘右滑打开按工作区分组的聊天列表，左滑关闭；
-  从右缘左滑打开会话详情面板。
-- **完整的聊天体验** —— 流式输出的回合与可展开的推理过程、Markdown、
-  终端/差异/读取/搜索/网页工具卡片、队列停靠栏（编辑 / 移除 / 引导）、历史分页、图片与文件附件。
-- **斜杠命令与技能** —— 输入 `/` 时，输入框上方会列出会话的命令和技能。
-  输入框会先拿 `/` 开头的一行去比对会话自己的命令目录，
-  命中就交给 harness 的命令网关执行；目录不认领的内容按普通提示发送，技能就是这样被调用的。
-  harness 装有 dsh-rewind 插件时，`/rewind` 会打开一个选择器。
-- **GUI 有的都有** —— 目标（阶段、轮次、暂停/继续/编辑）、计划模式与计划审阅、
-  权限审批、用户提问、待办停靠栏、子代理（目录、追问、中断）、后台任务、工作流运行、技能、
-  模型选择、代理预设、会话搜索、轨迹账本、会话导出、消息反馈。
-- **通知** —— 回合完成、目标完成 / 受阻、有审阅或提问在等你；
-  通过前台服务维持后台连接。
-- **和 harness 长得一样** —— 完全采用 DeepSeek Harness 的设计令牌（颜色、字体、圆角、
-  披露行、微光、墨水按钮），支持浅色 / 深色 / 跟随系统主题。
-- **11 种语言** —— English、中文、हिन्दी、Español、Français、العربية、বাংলা、Português、
-  Русский、اردو、ไทย（支持 RTL）。
-
-## 环境要求
-
-- Android 8.0 及以上（minSdk 26）。
-- 一个正在运行的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-  `0.2.1-alpha.2`，这是 DSH Mobile `0.16.0` 的协议基线。
-  App 保留了对 `0.2.0-rc.1`、`0.1.7-rc.x` 和 `0.1.6-alpha.x` 的旧协议兼容处理；
-  新增管理功能需要 harness 提供支持。已验证的范围请参见
-  [兼容性说明](docs/COMPATIBILITY.md)和 [0.13.0 验证记录](docs/VALIDATION-0.13.0.md)。
+[更新日志](CHANGELOG.md)列出了每个版本的改动。
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/sorsama/deepseek-harness-mobile/releases/latest)
-   安装最新的 APK。
-2. 打开应用，选择连接方式。这几种不是同一个设置的不同变体 ——
-   挑与你在电脑上配置好的那一种。
+### 1. 安装应用
 
-   **中继** —— 加密、有身份验证，在 Wi-Fi 之外也能用。把
-   [`dsh-relay`](https://github.com/sorsama/deepseek-harness-relay) 装进 harness 的 web 配置：
+从[最新版本](https://github.com/sorsama/deepseek-harness-mobile/releases/latest)下载 APK 并安装。需要 Android 8.0 或更高版本。
 
-   ```sh
-   dsh plugin --profile web add dsh-relay
-   dsh web
-   ```
+### 2. 让 harness 可以被访问
 
-   **在那台电脑上**打开打印出来的 URL，设置密码，然后打开 `/relay/pair`。
-   在应用里：**中继 → 配对中继**，扫描二维码。等你用的每台客户端都配对完，
-   就关掉中继的 `compat.addressGrants` —— 这里没有任何东西需要它。
+harness 默认只在它自己的电脑上监听。根据手机会在哪里使用，选择对应的方式。
 
-   **局域网** —— 手机上不用配置，也完全没有身份验证。按
-   [`harness/README.md`](harness/README.md) 打上单文件局域网补丁，重启 `dsh web`，
-   然后点**扫描网络**。只在你信任的网络上用。
+#### 和电脑连着同一个 Wi-Fi
 
-   **走你自己的 HTTPS 反向代理** —— 把 `https://` 地址粘进局域网模式。
-   代理可以转发到回环地址，所以 harness 不需要打补丁；但它只加密链路，不验证任何人的身份。
-   参见 [`harness/README.md`](harness/README.md)。
-
-   **USB / 模拟器** —— 运行 `dsh web`，再执行 `adb reverse tcp:3080 tcp:3080`，
-   然后在局域网模式下连接 `127.0.0.1:3080`。不需要打补丁。
-3. 选一个会话开始聊，harness 干完活会通知你。
-
-如果连接失败，应用会直接说明原因；wiki 的
-[疑难解答](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting)
-页面就是按那一句话组织的。
-
-## 兼容性与安全
-
-> **0.1.2:** 从 harness 0.1.2 起，harness 会对整个 API 进行认证：在 App 询问时，把它启动时打印的链接粘贴一次。这会认证本机，但不会加密连接，因此仍然只应在可信网络上使用。
-
-- harness 版本矩阵和仅回环可用的接口见
-  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
-- **请先读 [docs/SECURITY.md](docs/SECURITY.md)。** 裸的 harness 没有任何身份验证，
-  所以局域网模式只适合在你信任的网络上用 —— 应用在连接界面这么提醒也是出于同样的原因。
-  中继模式加上了真正的凭据和固定证书，但即便通过了验证，拿到的权力仍然等同于在那台电脑上
-  开一个 shell，因为代理就是在那里执行命令的。
-
-## 构建
+让 harness 在电脑的局域网地址上启动。harness 0.2.1-alpha.2 及更新版本可以这样做：
 
 ```sh
-./gradlew :app:assembleDebug      # 调试版 APK
-./gradlew :app:assembleRelease    # 发布版 APK（设置了 keystore 环境变量时会签名）
+dsh web --host 192.168.1.20
 ```
 
-发布的版本号来自 git 标签：发布工作流从标签名导出 `DSH_VERSION_NAME`，`versionCode` 由它推导。
-本地构建则回退到 `app/build.gradle.kts` 里写死的值。
+把 `192.168.1.20` 换成你电脑的实际地址。harness 会打印一行类似 `dsh web: http://192.168.1.20:3080/?token=…` 的内容。在应用里选择**局域网**，把这整条链接粘贴到地址栏（或点粘贴按钮），然后点**连接**。链接里的令牌会让手机完成登录，之后这个 harness 会出现在**最近使用**里，下次直接点就行。更早的 harness 版本不支持 `--host`，需要打一个小补丁，见 [`harness/README.md`](harness/README.md)。
 
-针对真实 harness 的开发流程、模块划分和发布流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+#### 不在家时
 
-## 仓库结构
+安装 [dsh-relay](https://github.com/sorsama/deepseek-harness-relay)。这是一个 harness 插件，提供密码、加密和设备配对。然后在应用里选择**中继**，扫描配对二维码。[wiki 上的 Relay 页面](https://github.com/sorsama/deepseek-harness-mobile/wiki/Relay)有完整的步骤。
+
+#### USB 数据线或模拟器
+
+在电脑上运行 `dsh web` 和 `adb reverse tcp:3080 tcp:3080`。在应用里选择**本机**，用 `dsh web` 打印出的链接登录。
+
+#### 在手机上运行
+
+harness 可以在 [Termux](https://f-droid.org/packages/com.termux/) 里运行。选择**本机**，应用就能替你启动和停止 harness，并自动登录。在 Termux 里配置 Node 目前还不是每台设备都能成功，请先阅读 [`harness/TERMUX.md`](harness/TERMUX.md)。
+
+#### 你自己的 HTTPS 反向代理
+
+在**局域网**模式下粘贴它的 `https://` 地址。代理会加密连接，但不会检查连过来的是谁。见 [`harness/README.md`](harness/README.md)。
+
+### 3. 开始工作
+
+从列表里选一个会话（从屏幕左边缘向右滑），或者新建一个。连接失败时，应用会说明原因，wiki 的[疑难解答页面](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting)就是按这些提示来组织的。
+
+## 安全
+
+通过网络连接之前，请先阅读 [docs/SECURITY.md](docs/SECURITY.md)。已登录的手机能做代理能做的任何事，而代理会在你的电脑上执行命令。让手机登录这件事，要像交出 shell 权限一样慎重对待。
+
+- 局域网模式会检查登录令牌，但不做任何加密。只在你信任的网络上使用。
+- 中继模式加上了加密和固定证书，在你的网络之外也能用。
+- 不要把 `dsh web` 链接给别人。拿到链接的人在 harness 重启之前都能登录。
+
+## 兼容性
+
+DSH Mobile 针对 **DeepSeek Harness 0.2.1-rc.2** 测试。最早到 0.1.6 的旧版 harness 大部分功能仍然可用，但较新的功能需要较新的 harness。[兼容性表](docs/COMPATIBILITY.md)列出了每个应用版本对应的 harness 版本。
+
+## 从源码构建
+
+```sh
+./gradlew :app:assembleDebug      # debug APK
+./gradlew :app:assembleRelease    # release APK, signed when the keystore environment is set
+./gradlew :core:test :app:testDebugUnitTest
+```
+
+要用真实的 harness 检验应用，先构建一份 harness 源码，再运行一致性测试套件：
+
+```sh
+DSH_HARNESS_SRC=/path/to/deepseek-harness ./gradlew :conformance:test
+```
+
+发布构建的版本号取自 git 标签。[CONTRIBUTING.md](CONTRIBUTING.md) 介绍了开发流程、模块划分和发布步骤。
 
 | 路径 | 内容 |
 |---|---|
-| `core/` | 纯 JVM 协议核心：线路 DTO、RPC 客户端、WebSocket 下行流、重连循环、会话折叠、通知分类器 |
-| `app/` | Android UI：各界面、发现与连接、前台服务、通知、国际化 |
-| `mock-harness/` | 用于测试的 harness `/api` 服务端 Ktor 模拟实现 |
-| `tools/capture/` | 把真实 harness 流量录制成一致性测试夹具 |
-| `harness/` | 局域网模式的配套补丁与指南 |
-| — | 中继本身在 [sorsama/deepseek-harness-relay](https://github.com/sorsama/deepseek-harness-relay) |
+| `app/` | Android 应用：各个界面、连接、通知、翻译 |
+| `core/` | 纯 Kotlin 协议代码：线路类型、RPC 与流客户端、重连逻辑、会话事件折叠 |
+| `conformance/` | 启动真实 harness 并检查应用发出的每一个调用的测试 |
+| `mock-harness/` | 供测试使用的小型模拟 harness 服务端 |
+| `tools/capture/` | 把真实 harness 的流量录制成测试夹具 |
+| `harness/` | 局域网和 Termux 的设置指南 |
 | `docs/` | [架构](docs/ARCHITECTURE.md)、[协议说明](docs/PROTOCOL.md)、[兼容性](docs/COMPATIBILITY.md)、[安全](docs/SECURITY.md) |
+
+中继插件在单独的仓库里：
+[sorsama/deepseek-harness-relay](https://github.com/sorsama/deepseek-harness-relay)。
 
 ## 许可证
 
-[MIT](LICENSE)。随附的第三方材料列在
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。DeepSeek Harness 及其品牌归各自所有者所有；
-本项目是一个独立的、由社区构建的远程端。
+[MIT](LICENSE)。随应用附带的第三方材料列在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。DeepSeek Harness 及其品牌归其所有者所有，本项目与他们没有任何关联。
