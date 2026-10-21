@@ -26,6 +26,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -128,29 +133,54 @@ fun ThinkingRow(
     }
 }
 
-/** Full-width top strip announcing a connection problem. */
+/**
+ * Full-width top strip announcing a connection problem.
+ *
+ * Two tones, because the two situations ask different things of the reader. A dropped stream the
+ * app is already re-establishing is [warning]: amber, with a spinner, nothing to do. A failure that
+ * will not fix itself is red and carries its own [actionLabel]; the retry used to be the whole strip
+ * wrapped in a borderless text button, which nobody could tell was pressable.
+ */
 @Composable
-fun ConnectionBanner(message: String) {
+fun ConnectionBanner(
+    message: String,
+    warning: Boolean = false,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    val colors = DsTheme.colors
+    val background = if (warning) colors.warnTertiary else colors.error
+    val content = if (warning) colors.warnLabel else Color.White
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DsTheme.colors.error)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .background(background)
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+            .padding(start = 16.dp, end = if (actionLabel != null) 4.dp else 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Filled.Warning,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(16.dp),
-        )
+        if (warning) {
+            CircularProgressIndicator(Modifier.size(14.dp), color = content, strokeWidth = 2.dp)
+        } else {
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = null,
+                tint = content,
+                modifier = Modifier.size(16.dp),
+            )
+        }
         Spacer(Modifier.width(8.dp))
         Text(
             message,
             style = DsType.small13,
-            color = Color.White,
+            color = content,
             modifier = Modifier.weight(1f),
         )
+        if (actionLabel != null && onAction != null) {
+            TextButton(onClick = onAction) {
+                Text(actionLabel, style = DsType.small13Strong, color = content)
+            }
+        }
     }
 }
 

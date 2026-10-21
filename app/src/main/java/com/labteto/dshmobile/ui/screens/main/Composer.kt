@@ -52,6 +52,16 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.labteto.dshmobile.ui.components.pressScale
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -257,6 +267,7 @@ internal fun Composer(
                         if (event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)) {
                             if (event.type == KeyEventType.KeyUp && canSend) {
                                 val text = currentDraft
+                                editor = androidx.compose.ui.text.input.TextFieldValue("")
                                 currentOnDraftChange("")
                                 currentOnSend(text)
                             }
@@ -344,25 +355,50 @@ internal fun Composer(
                     // Stop keeps the right-hand position it had, so the gesture for stopping a turn is
                     // where it always was and send appears beside it rather than under the thumb
                     // already reaching for stop.
+                    // The send button lights up as the draft becomes sendable rather than switching
+                    // colour in one frame, and gives a small pop when it does, so the change that
+                    // makes it pressable is noticed without looking for it.
+                    val sendFill by animateColorAsState(
+                        if (canSend) colors.buttonInfoFill else colors.buttonPrimaryDimmed,
+                        DsAnimations.tabSwapColor,
+                        label = "sendFill",
+                    )
+                    val sendTint by animateColorAsState(
+                        if (canSend) Color.White else colors.labelTertiary,
+                        DsAnimations.tabSwapColor,
+                        label = "sendTint",
+                    )
+                    val sendScale by animateFloatAsState(
+                        if (canSend) 1f else 0.92f,
+                        spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium),
+                        label = "sendScale",
+                    )
                     CircleAction(
                         icon = Icons.Filled.ArrowUpward,
                         description = stringResource(R.string.chat_composer_send),
                         size = 40,
-                        background = if (canSend) colors.buttonInfoFill else colors.buttonPrimaryDimmed,
-                        tint = if (canSend) Color.White else colors.labelTertiary,
+                        background = sendFill,
+                        tint = sendTint,
                         enabled = canSend,
+                        modifier = Modifier.graphicsLayer { scaleX = sendScale; scaleY = sendScale },
                         onClick = {
                             val text = currentDraft
+                            // Cleared here as well as through the draft: the field only follows the
+                            // draft a frame later, and an IME update landing in that frame (the
+                            // keyboard finishing its composing word) carried the sent text back in.
+                            editor = androidx.compose.ui.text.input.TextFieldValue("")
                             currentOnDraftChange("")
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             currentOnSend(text)
                         },
                     )
 
+                    // Grows its own width in and out, so the controls beside it slide over rather than
+                    // jumping by a button's width the moment a turn starts or ends.
                     AnimatedVisibility(
                         visible = running,
-                        enter = fadeIn(DsAnimations.fade) + scaleIn(initialScale = 0.85f),
-                        exit = fadeOut(DsAnimations.fade) + scaleOut(targetScale = 0.85f),
+                        enter = fadeIn(DsAnimations.fade) + expandHorizontally(DsAnimations.expand) + scaleIn(initialScale = 0.85f),
+                        exit = fadeOut(DsAnimations.fade) + shrinkHorizontally(DsAnimations.expand) + scaleOut(targetScale = 0.85f),
                     ) {
                         CircleAction(
                             icon = null,
@@ -422,6 +458,10 @@ private fun PermissionChip(
             modifier = Modifier
                 .clip(DsShapes.cube)
                 .clickable(enabled = enabled && pending == null) { menuOpen = true }
+                // 24dp of chip was the smallest target in the composer for a setting that decides
+                // whether the agent can run commands unasked.
+                .heightIn(min = 36.dp)
+                .wrapContentHeight(Alignment.CenterVertically)
                 .padding(horizontal = 8.dp, vertical = 4.dp)
                 .then(
                     if (pending != null) {
@@ -614,14 +654,17 @@ private fun CircleAction(
     tint: Color,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: (@Composable () -> Unit)? = null,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
+        interactionSource = interaction,
         // Described here rather than on the icon, because not every one of these has an icon: the
         // stop button draws a plain square through `content`, and while the description hung off
         // the icon that button announced nothing at all to a screen reader.
-        modifier = Modifier.size(size.dp).semantics { this.contentDescription = description },
+        modifier = modifier.pressScale(interaction, 0.9f).size(size.dp).semantics { this.contentDescription = description },
         enabled = enabled,
         shape = CircleShape,
         color = background,

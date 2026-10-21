@@ -43,6 +43,9 @@ fun ApprovalPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = DsTheme.colors
+    val haptics = rememberDsHaptics()
+    // The turn is blocked on this card, so its arrival is felt as well as seen.
+    androidx.compose.runtime.LaunchedEffect(Unit) { haptics.attention() }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = DsShapes.approvalCard,
@@ -77,18 +80,20 @@ fun ApprovalPanel(
                     style = DsType.small13,
                     color = colors.labelSecondary,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DsButton(
-                        text = stringResource(R.string.approval_allow_once),
-                        onClick = onAllow,
-                        variant = DsButtonVariant.Info,
-                        size = DsButtonSize.Small,
-                    )
+                // Full-size, half-width each: the one decision the turn is waiting on gets the
+                // biggest targets on the card, with Reject on the left, away from the thumb's rest.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DsButton(
                         text = stringResource(R.string.approval_reject),
-                        onClick = onReject,
+                        onClick = { haptics.reject(); onReject() },
                         variant = DsButtonVariant.Outline,
-                        size = DsButtonSize.Small,
+                        modifier = Modifier.weight(1f),
+                    )
+                    DsButton(
+                        text = stringResource(R.string.approval_allow_once),
+                        onClick = { haptics.confirm(); onAllow() },
+                        variant = DsButtonVariant.Info,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }

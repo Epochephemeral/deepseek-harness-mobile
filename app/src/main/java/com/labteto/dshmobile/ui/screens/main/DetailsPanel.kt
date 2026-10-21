@@ -3,7 +3,6 @@ package com.labteto.dshmobile.ui.screens.main
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import android.content.Context
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
@@ -27,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.draw.clip
@@ -119,7 +119,7 @@ fun DetailsPanel(
     modifier: Modifier = Modifier,
     onOpenAutomations: () -> Unit = {},
 ) {
-    BackHandler(onBack = onClose)
+    // Back is handled by MainScreen, which drags the panel closed with the predictive back gesture.
     val store = rememberSessionStore()
     val automationAvailable by store.automationAvailable.collectAsStateWithLifecycle()
     val colors = DsTheme.colors
@@ -148,6 +148,7 @@ fun DetailsPanel(
     var sheet by remember { mutableStateOf<DetailsSheet?>(null) }
     var openJob by remember { mutableStateOf<JobView?>(null) }
     var archiveBusy by remember { mutableStateOf<com.labteto.dshmobile.data.ArchiveOutcome.Busy?>(null) }
+    var archiveConfirm by remember { mutableStateOf(false) }
 
     val savedLabel = stringResource(R.string.chat_export_saved)
     val failedLabel = stringResource(R.string.chat_export_failed)
@@ -194,12 +195,9 @@ fun DetailsPanel(
                         scope.launch { currentSessionId?.let { store.renameSession(it, title) } }
                     },
                     onFork = { scope.launch { currentSessionId?.let { store.forkSession(it) } } },
-                    onArchive = {
-                        scope.launch {
-                            val sid = currentSessionId ?: return@launch
-                            (store.archiveSession(sid) as? com.labteto.dshmobile.data.ArchiveOutcome.Busy)?.let { archiveBusy = it }
-                        }
-                    },
+                    // Asked first, as the drawer's archive always was: the same action took one
+                    // tap here and two there, and here is where it is easiest to hit by accident.
+                    onArchive = { archiveConfirm = true },
                     onOpenModels = { sheet = DetailsSheet.Models },
                     onOpenPresets = {
                         scope.launch { store.refreshAgentPresets() }
@@ -288,6 +286,22 @@ fun DetailsPanel(
         )
     }
 
+    if (archiveConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.chatlist_session_archive),
+            body = current?.let { displaySessionTitle(it) }.orEmpty(),
+            confirmLabel = stringResource(R.string.common_archive),
+            onDismiss = { archiveConfirm = false },
+            onConfirm = {
+                archiveConfirm = false
+                scope.launch {
+                    val sid = currentSessionId ?: return@launch
+                    (store.archiveSession(sid) as? com.labteto.dshmobile.data.ArchiveOutcome.Busy)?.let { archiveBusy = it }
+                }
+            },
+        )
+    }
+
     archiveBusy?.let { busy ->
         ArchiveBusyDialog(
             busy = busy,
@@ -306,16 +320,19 @@ private enum class DetailsSheet { Models, Presets }
 @Composable
 private fun HeaderRow(onClose: () -> Unit) {
     val colors = DsTheme.colors
+    // Close sits at the panel's outer edge, the side it slides away to. A back arrow pointing at
+    // the chat read as "go further in", the opposite of what it did.
     Row(verticalAlignment = Alignment.CenterVertically) {
-        DsIconButton(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = stringResource(R.string.common_back),
-            onClick = onClose,
-        )
         Text(
             stringResource(R.string.chat_details_title),
             style = DsType.large20,
             color = colors.labelPrimary,
+            modifier = Modifier.weight(1f).padding(start = DsSpacing.small),
+        )
+        DsIconButton(
+            icon = Icons.Filled.Close,
+            contentDescription = stringResource(R.string.common_close),
+            onClick = onClose,
         )
     }
 }

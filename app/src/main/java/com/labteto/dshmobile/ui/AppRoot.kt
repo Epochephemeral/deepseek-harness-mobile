@@ -2,6 +2,9 @@ package com.labteto.dshmobile.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +43,7 @@ import com.labteto.dshmobile.ui.screens.connect.ConnectScreen
 import com.labteto.dshmobile.ui.screens.main.MainScreen
 import com.labteto.dshmobile.ui.screens.pair.PairScreen
 import com.labteto.dshmobile.ui.screens.settings.SettingsScreen
+import com.labteto.dshmobile.ui.theme.DsAnimations
 import com.labteto.dshmobile.ui.theme.DsSpacing
 import com.labteto.dshmobile.ui.theme.DsTheme
 import com.labteto.dshmobile.ui.theme.DsType
@@ -87,18 +91,34 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
         var pairUrl by rememberSaveable { mutableStateOf<String?>(null) }
         val showMain = connection.phase == ConnectionPhase.CONNECTED ||
             (connection.phase == ConnectionPhase.RECONNECTING && connection.hasConnected)
-        Box(Modifier.fillMaxSize()) {
-            when {
-                showSettings -> SettingsScreen(onClose = { showSettings = false })
-                showPair -> PairScreen(onClose = { showPair = false }, prefillUrl = pairUrl)
-                showMain -> MainScreen(onOpenSettings = { showSettings = true })
-                else -> ConnectScreen(
-                    onOpenSettings = { showSettings = true },
-                    onPair = { url ->
-                        pairUrl = url
-                        showPair = true
-                    },
-                )
+        val route = when {
+            showSettings -> RootRoute.Settings
+            showPair -> RootRoute.Pair
+            showMain -> RootRoute.Main
+            else -> RootRoute.Connect
+        }
+        Box(Modifier.fillMaxSize().background(DsTheme.colors.bgBase)) {
+            // One motion for every top-level change: the new screen settles in from slightly
+            // smaller while the old one gets out of the way. Connecting used to cut straight from
+            // the connect form to a full chat in a single frame, which read as a flash rather than
+            // as arriving somewhere.
+            AnimatedContent(
+                targetState = route,
+                transitionSpec = { DsAnimations.screenEnter togetherWith DsAnimations.screenExit },
+                label = "rootRoute",
+            ) { current ->
+                when (current) {
+                    RootRoute.Settings -> SettingsScreen(onClose = { showSettings = false })
+                    RootRoute.Pair -> PairScreen(onClose = { showPair = false }, prefillUrl = pairUrl)
+                    RootRoute.Main -> MainScreen(onOpenSettings = { showSettings = true })
+                    RootRoute.Connect -> ConnectScreen(
+                        onOpenSettings = { showSettings = true },
+                        onPair = { url ->
+                            pairUrl = url
+                            showPair = true
+                        },
+                    )
+                }
             }
             DsToastHost(toast, modifier = Modifier.fillMaxWidth())
         }
@@ -127,6 +147,9 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
         }
     }
 }
+
+/** The top-level screens [AppRoot] switches between. */
+private enum class RootRoute { Connect, Main, Settings, Pair }
 
 /**
  * "There is a newer release."

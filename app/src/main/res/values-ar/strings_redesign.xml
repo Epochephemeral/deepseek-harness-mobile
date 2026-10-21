@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_jump_latest">الانتقال إلى الأحدث</string>
+    <string name="chat_suggest_overview">أعطني نظرة عامة على هذا المشروع</string>
+    <string name="chat_suggest_tests">شغّل الاختبارات وأصلح ما يفشل</string>
+    <string name="chat_suggest_changes">راجع تغييراتي التي لم تُثبَّت بعد</string>
+    <string name="chat_queue_placement_queued">الجولة التالية</string>
+    <string name="chat_queue_placement_steering">توجيه</string>
+    <string name="chat_queue_placement_context">سياق</string>
+    <string name="chat_status_running">يعمل</string>
+    <string name="chat_status_idle">خامل</string>
+    <string name="chatlist_session_copy_id">نسخ معرّف الجلسة</string>
+    <string name="connect_paste">لصق</string>
+    <string name="connect_try_again">حاول مرة أخرى</string>
+    <string name="connect_manual_paste_hint">الصق الرابط الذي يطبعه dsh web مع الرمز، وسيتم تسجيل دخولك أيضًا.</string>
+    <plurals name="chat_jump_latest_new">
+        <item quantity="zero">%d جديدة</item>
+        <item quantity="one">%d جديدة</item>
+        <item quantity="two">%d جديدة</item>
+        <item quantity="few">%d جديدة</item>
+        <item quantity="many">%d جديدة</item>
+        <item quantity="other">%d جديدة</item>
+    </plurals>
+    <plurals name="trajectory_step_count">
+        <item quantity="zero">%d خطوة</item>
+        <item quantity="one">%d خطوة</item>
+        <item quantity="two">%d خطوتان</item>
+        <item quantity="few">%d خطوات</item>
+        <item quantity="many">%d خطوة</item>
+        <item quantity="other">%d خطوة</item>
+    </plurals>
+    <plurals name="chat_stats_turn_count">
+        <item quantity="zero">%d دور</item>
+        <item quantity="one">%d دور</item>
+        <item quantity="two">%d دوران</item>
+        <item quantity="few">%d أدوار</item>
+        <item quantity="many">%d دورًا</item>
+        <item quantity="other">%d دور</item>
+    </plurals>
+    <plurals name="chat_changed_files">
+        <item quantity="zero">تم تغيير %d ملف</item>
+        <item quantity="one">تم تغيير %d ملف</item>
+        <item quantity="two">تم تغيير %d ملف</item>
+        <item quantity="few">تم تغيير %d ملفات</item>
+        <item quantity="many">تم تغيير %d ملفًا</item>
+        <item quantity="other">تم تغيير %d ملف</item>
+    </plurals>
+</resources>

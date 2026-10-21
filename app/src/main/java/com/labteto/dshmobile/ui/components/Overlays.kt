@@ -1,6 +1,17 @@
 package com.labteto.dshmobile.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,23 +108,40 @@ fun rememberDsToast(): Pair<State<String?>, (String) -> Unit> {
     return state to { flow.value = it }
 }
 
-/** Top-center toast plate driven by [rememberDsToast]. */
+/**
+ * Top-center toast plate driven by [rememberDsToast].
+ *
+ * It drops in from under the status bar and lifts away again, rather than blinking on and off:
+ * a plate that appears in one frame over the top bar reads as a glitch in the chrome. The last
+ * message is held while the exit runs, so the plate does not empty out as it leaves. Below the
+ * status bar on purpose: the activity draws edge to edge, and a toast that starts at y = 0 hides
+ * its first line behind the clock.
+ */
 @Composable
 fun DsToastHost(state: Pair<State<String?>, (String) -> Unit>, modifier: Modifier = Modifier) {
-    val message = state.first.value ?: return
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-        Surface(
-            shape = DsShapes.toast,
-            color = DsTheme.colors.toastBg,
-            shadowElevation = 4.dp,
-            modifier = Modifier.padding(top = 16.dp),
+    val message = state.first.value
+    var last by remember { mutableStateOf<String?>(null) }
+    val shown = message ?: last
+    SideEffect { if (message != null) last = message }
+    Box(modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars), contentAlignment = Alignment.TopCenter) {
+        AnimatedVisibility(
+            visible = message != null,
+            enter = fadeIn(tween(160)) + slideInVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium)) { -it },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { -it / 2 },
         ) {
-            Text(
-                message,
-                style = DsType.small13,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            )
+            Surface(
+                shape = DsShapes.toast,
+                color = DsTheme.colors.toastBg,
+                shadowElevation = 6.dp,
+                modifier = Modifier.padding(top = 12.dp, start = 24.dp, end = 24.dp),
+            ) {
+                Text(
+                    shown.orEmpty(),
+                    style = DsType.small13,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
         }
     }
 }

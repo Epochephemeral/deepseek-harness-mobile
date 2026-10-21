@@ -689,10 +689,18 @@ class ConnectViewModel @Inject constructor(
     }
 
     fun connectManual(host: String, port: String) {
-        // The field takes what people actually have — a pasted URL as readily as a bare address.
+        // The field takes what people actually have — a pasted URL as readily as a bare address,
+        // and the whole `dsh web: http://…?token=…` line the harness prints as readily as either.
         // A port named inside it was typed as part of this address, so it outranks the port field,
         // which may still hold the default from a different harness.
-        val input = parseHostInput(host)
+        val launchLine = com.labteto.dshmobile.core.wire.HarnessLaunchLine.parse(host)
+        val address = launchLine?.baseUrl ?: host
+        // A token pasted with the address is the sign-in the harness is about to ask for. Spending
+        // it straight away turns "connect, get refused, find the token again, paste it into a
+        // dialog" into one step.
+        val pastedToken = launchLine?.token
+            ?: host.takeIf { "token=" in it }?.let { com.labteto.dshmobile.core.wire.HarnessSession.tokenFrom(it) }
+        val input = parseHostInput(address)
         val portInt = input?.port ?: when (input?.useTls) { true -> 443; false -> 80; null -> port.trim().toIntOrNull() }
         if (input == null || portInt == null || portInt !in 1..65535) {
             fail(ConnectFailure.InvalidInput, attempted = null)
@@ -744,6 +752,16 @@ class ConnectViewModel @Inject constructor(
                     val target = hostsStore.rememberHost(name = input.host, host = input.host,
                         port = portInt, isLoopback = isLoopback, useTls = useTls, basePath = input.basePath)
                     _state.update { it.copy(remembered = it.remembered.filterNot { h -> h.id == target.id } + target) }
+                    if (pastedToken != null) {
+                        val exchange = harnessSessions.pair(target.id, target.baseUrl, pastedToken)
+                        if (exchange is SessionExchange.Granted) {
+                            _state.update { it.copy(attempted = authority) }
+                            connectTo(target)
+                            return@launch
+                        }
+                        // The token was stale or for another harness process: fall through to the
+                        // ordinary sign-in failure, which offers the dialog for a fresh one.
+                    }
                 }
                 fail(ConnectFailure.from(outcome, relay = paired != null), authority)
                 return@launch

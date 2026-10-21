@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,9 @@ internal fun TrajectoryTab(
     cwd: String?,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    loadingOlder: Boolean = false,
+    loadOlderFailed: Boolean = false,
+    onLoadOlder: () -> Unit = {},
 ) {
     val colors = DsTheme.colors
     val nodes = remember(conversation?.journal, conversation?.nodes) {
@@ -64,7 +68,13 @@ internal fun TrajectoryTab(
             conversation.journal.map { it.copy(surfaceOp = null, surfaceIntent = null) },
         ).nodes
     }
-    val groups = remember(nodes) { groupByTurn(nodes) }
+    // Structural markers are dropped before grouping, not just drawn as nothing: an empty row
+    // still costs the list's spacing, and a turn of tool calls would gain a gap around each one.
+    var rawOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val groups = remember(nodes) {
+        groupByTurn(nodes.filterNot { it is com.labteto.dshmobile.core.session.OtherNode && it.type in STRUCTURAL_EVENT_TYPES })
+            .map { (turn, turnNodes) -> LedgerTurn(turn, turnNodes, ledgerRows(turnNodes)) }
+    }
 
     LazyColumn(
         state = listState,
@@ -72,6 +82,14 @@ internal fun TrajectoryTab(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        // The ledger shows what the transcript has loaded, and Chat pages history in as you
+        // scroll up. Nothing scrolls the ledger's top into a fetch, so earlier turns were simply
+        // missing here until Chat had been scrolled back far enough. This row asks for them.
+        if (conversation?.hasMore == true) {
+            item(key = "load-older") {
+                LoadOlderRow(loading = loadingOlder, failed = loadOlderFailed, offerManual = true, onRetry = onLoadOlder)
+            }
+        }
         if (groups.isEmpty()) {
             item(key = "empty") {
                 Text(
@@ -81,29 +99,22 @@ internal fun TrajectoryTab(
                 )
             }
         }
-        groups.forEach { (turn, turnNodes) ->
+        groups.forEach { (turn, turnNodes, rows) ->
             item(key = "turn-$turn") {
                 SectionHeader(
                     title = stringResource(R.string.trajectory_turn, turn),
-                    action = stringResource(R.string.trajectory_steps, turnNodes.count { it is ToolCallNode }),
+                    action = turnNodes.count { it is ToolCallNode }.let { pluralStringResource(R.plurals.trajectory_step_count, it, it) },
                 )
             }
             items(
-                count = turnNodes.size,
-                key = { index -> "n-${turnNodes[index].seq}" },
+                count = rows.size,
+                key = { index -> "n-${rows[index].seq}" },
             ) { index ->
-                TrajectoryRow(turnNodes[index], turnNodes, cwd)
-            }
-        }
-        conversation?.journal?.forEach { event ->
-            item(key = "raw-${event.seq}") {
-                JsonDisclosure("#${event.seq} · ${event.type} · ${java.text.DateFormat.getTimeInstance().format(java.util.Date(event.time))}",
-                    kotlinx.serialization.json.buildJsonObject {
-                        put("data", event.data)
-                        event.surfaceIntent?.let { put("surfaceOp", it) }
-                        event.sourceEventSeqs?.let { put("sourceEventSeqs", kotlinx.serialization.json.JsonArray(it.map { seq -> kotlinx.serialization.json.JsonPrimitive(seq) })) }
-                        event.ignorable?.let { put("ignorable", kotlinx.serialization.json.JsonPrimitive(it)) }
-                    })
+                when (val row = rows[index]) {
+                    is LedgerRow.Node -> TrajectoryRow(row.node, turnNodes, cwd)
+                    is LedgerRow.Context -> ContextGroupRow(row.nodes, ChatNodeContext(turnNodes, false, cwd,
+                        onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> }))
+                }
             }
         }
         if (stats != null || usage != null) {
@@ -112,7 +123,66 @@ internal fun TrajectoryTab(
                 TrajectoryTotals(stats, usage)
             }
         }
+        // Every event as the host logged it, for the rare reader who needs the wire. Collapsed by
+        // default and after the totals: open, it is hundreds of rows, and with no heading the
+        // ledger above seemed to turn into a debug dump halfway down.
+        val journal = conversation?.journal.orEmpty()
+        if (journal.isNotEmpty()) {
+            item(key = "raw-header") {
+                com.labteto.dshmobile.ui.components.DisclosureRow(
+                    title = stringResource(R.string.trajectory_tab_raw),
+                    summary = journal.size.toString(),
+                    icon = com.labteto.dshmobile.ui.components.FeatherIcons.List,
+                    expanded = rawOpen,
+                    onToggle = { rawOpen = !rawOpen },
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+            if (rawOpen) {
+                journal.forEach { event ->
+                    item(key = "raw-${event.seq}") {
+                        JsonDisclosure("#${event.seq} · ${event.type} · ${java.text.DateFormat.getTimeInstance().format(java.util.Date(event.time))}",
+                            kotlinx.serialization.json.buildJsonObject {
+                                put("data", event.data)
+                                event.surfaceIntent?.let { put("surfaceOp", it) }
+                                event.sourceEventSeqs?.let { put("sourceEventSeqs", kotlinx.serialization.json.JsonArray(it.map { seq -> kotlinx.serialization.json.JsonPrimitive(seq) })) }
+                                event.ignorable?.let { put("ignorable", kotlinx.serialization.json.JsonPrimitive(it)) }
+                            })
+                    }
+                }
+            }
+        }
     }
+}
+
+/**
+ * What the harness put in front of the model rather than what anyone typed: its system prompt,
+ * the request context, and the runtime, skill and time snapshots it injects as user messages.
+ * Chat folds these into one "Context" row; the ledger used to print each as a `> ` line, which
+ * read as though the person had written a page of system text before every turn.
+ */
+private fun isHarnessContext(node: ChatNode): Boolean =
+    (node is UserMessageNode && node.isInjectedContext && node.sourceKind != com.labteto.dshmobile.core.session.REWIND_SOURCE_KIND) ||
+        (node is com.labteto.dshmobile.core.session.OtherNode && node.type in setOf("system/message", "request/context"))
+
+/** One turn of the ledger: its nodes, and the rows drawn for them. */
+private data class LedgerTurn(val turn: Int, val nodes: List<ChatNode>, val rows: List<LedgerRow>)
+
+/** A ledger row: one node, or a run of harness context drawn as Chat draws it. */
+private sealed interface LedgerRow {
+    val seq: Long
+    data class Node(val node: ChatNode) : LedgerRow { override val seq get() = node.seq }
+    data class Context(val nodes: List<ChatNode>) : LedgerRow { override val seq get() = nodes.first().seq }
+}
+
+/** The turn's nodes with each run of harness context folded into one row. */
+private fun ledgerRows(nodes: List<ChatNode>): List<LedgerRow> {
+    val out = mutableListOf<LedgerRow>()
+    var run = mutableListOf<ChatNode>()
+    fun flush() { if (run.isNotEmpty()) { out += LedgerRow.Context(run.toList()); run = mutableListOf() } }
+    nodes.forEach { node -> if (isHarnessContext(node)) run += node else { flush(); out += LedgerRow.Node(node) } }
+    flush()
+    return out
 }
 
 @Composable
@@ -143,7 +213,15 @@ private fun TrajectoryRow(node: ChatNode, siblings: List<ChatNode>, cwd: String?
                 .firstOrNull { it.callId == node.callId }
             ToolLedgerRow(node, result, cwd)
         }
-        is com.labteto.dshmobile.core.session.OtherNode -> JsonDisclosure(node.type, node.data)
+        // Step boundaries are already counted in the turn header; as rows they put a
+        // `step/start` and a `step/end` around every tool call in the ledger. The changes marker
+        // reads as the turn's changed files, as it does in Chat.
+        is com.labteto.dshmobile.core.session.OtherNode -> when {
+            node.type in STRUCTURAL_EVENT_TYPES -> Unit
+            node.type == "workspace/changes" && changesTurn(node.data) != null ->
+                ChangedFilesRow(siblings, changesTurn(node.data)!!, cwd)
+            else -> JsonDisclosure(node.type, node.data)
+        }
         else -> Unit
     }
 }
@@ -196,7 +274,7 @@ private fun TrajectoryTotals(stats: SessionStatsView?, usage: TokenUsageView?) {
         SectionHeader(stringResource(R.string.trajectory_tab_usage))
         stats?.let {
             Text(
-                stringResource(R.string.chat_stats_turns, it.turns, it.steps),
+                pluralStringResource(R.plurals.chat_stats_turn_count, it.turns, it.turns) + " · " + pluralStringResource(R.plurals.trajectory_step_count, it.steps, it.steps),
                 style = DsType.caption11,
                 color = colors.labelTertiary,
             )

@@ -27,6 +27,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.labteto.dshmobile.ui.components.pressScale
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.animation.animateContentSize
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -49,6 +57,36 @@ import com.labteto.dshmobile.ui.theme.DsShapes
 import com.labteto.dshmobile.ui.theme.DsSpacing
 import com.labteto.dshmobile.ui.theme.DsTheme
 import com.labteto.dshmobile.ui.theme.DsType
+
+/**
+ * Whether the agent is working, said in words as well as by the dot.
+ *
+ * The dot alone was an 8dp glyph with no label and nothing for a screen reader: the most important
+ * fact on the screen while a turn runs. Running, it grows into a small "Working" pill; idle, it
+ * shrinks back to the dot, so the chrome only spends width on the state worth noticing.
+ */
+@Composable
+private fun RunStatus(running: Boolean) {
+    val colors = DsTheme.colors
+    val label = stringResource(if (running) R.string.chat_status_running else R.string.chat_status_idle)
+    Row(
+        modifier = Modifier
+            .padding(horizontal = DsSpacing.tiny)
+            .clip(DsShapes.pillFull)
+            .background(if (running) colors.accentTertiary else androidx.compose.ui.graphics.Color.Transparent)
+            .animateContentSize(DsAnimations.expand)
+            .padding(horizontal = if (running) DsSpacing.compact else DsSpacing.tiny, vertical = DsSpacing.tiny)
+            .clearAndSetSemantics {
+                contentDescription = label
+                liveRegion = LiveRegionMode.Polite
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        StateDot(if (running) StateDotState.Running else StateDotState.Idle)
+        if (running) Text(label, style = DsType.small13Strong, color = colors.accent, maxLines = 1)
+    }
+}
 
 /** The two views of a session the harness offers. */
 internal enum class ChatTab { Chat, Trajectory }
@@ -103,21 +141,25 @@ internal fun ChatTopBar(
                 tint = colors.labelSecondary,
                 iconSize = 18.dp,
             )
-            ModelChip(models = models, onClick = onOpenModels, modifier = Modifier.weight(1f, fill = false))
-            // Beside the model chip rather than next to the info button: both answer "what is this
-            // session doing", and a fixed position lets the thumb learn it instead of hunting a
-            // gap that the growing model label keeps moving.
-            if (historyEnabled) {
-                DsIconButton(
-                    icon = FeatherIcons.List,
-                    contentDescription = stringResource(R.string.chat_history_title),
-                    onClick = onOpenHistory,
-                    tint = colors.labelSecondary,
-                    iconSize = 18.dp,
-                )
+            // The chip and the history button share one weighted group, so the chip can use every
+            // spare pixel. Weighting the chip against a weighted spacer split the space in half and
+            // cut "DeepSeek-V4-Pro" down to "Deep…" on a phone that had room for all of it.
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                ModelChip(models = models, onClick = onOpenModels, modifier = Modifier.weight(1f, fill = false))
+                // Beside the model chip rather than next to the info button: both answer "what is
+                // this session doing", and a fixed position lets the thumb learn it instead of
+                // hunting a gap that the growing model label keeps moving.
+                if (historyEnabled) {
+                    DsIconButton(
+                        icon = FeatherIcons.List,
+                        contentDescription = stringResource(R.string.chat_history_title),
+                        onClick = onOpenHistory,
+                        tint = colors.labelSecondary,
+                        iconSize = 18.dp,
+                    )
+                }
             }
-            Spacer(Modifier.weight(1f))
-            StateDot(if (running) StateDotState.Running else StateDotState.Idle)
+            RunStatus(running)
             if (!detailsOpen) {
                 DsIconButton(
                     icon = FeatherIcons.Info,
@@ -200,14 +242,16 @@ private fun ModelChip(
     val effort = model?.reasoning?.efforts?.firstOrNull { it.id == current.reasoningEffort }
     val modelLabel = model?.name ?: technicalDisplay(current.model)
 
+    val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
-            .widthIn(max = 240.dp)
-            .heightIn(min = 28.dp)
+            .widthIn(max = 280.dp)
+            .pressScale(interaction)
+            .heightIn(min = 32.dp)
             .clip(DsShapes.pillFull)
             .background(colors.hoverSolid)
             .border(1.dp, colors.borderL2, DsShapes.pillFull)
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick)
             .padding(horizontal = DsSpacing.compact, vertical = DsSpacing.tiny),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DsSpacing.tiny),

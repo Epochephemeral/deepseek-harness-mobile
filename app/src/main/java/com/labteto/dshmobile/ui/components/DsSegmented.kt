@@ -1,6 +1,8 @@
 package com.labteto.dshmobile.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -13,10 +15,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -28,6 +41,7 @@ import com.labteto.dshmobile.ui.theme.DsSpacing
 import com.labteto.dshmobile.ui.theme.DsTheme
 import com.labteto.dshmobile.ui.theme.DsType
 import com.labteto.dshmobile.ui.theme.DshTheme
+import kotlinx.coroutines.launch
 
 /** One choice in a [DsSegmented] track. */
 data class DsSegment(val key: String, val label: String)
@@ -63,6 +77,27 @@ fun DsSegmented(
     maxLabelLines: Int = 1,
 ) {
     val colors = DsTheme.colors
+    // One thumb for the whole track, sliding to whichever segment is live, rather than a fill per
+    // segment cross-fading. The slide is what tells the eye the two states are the same control:
+    // a fade out here and a fade in there reads as two unrelated buttons changing colour.
+    val bounds = remember { mutableStateMapOf<String, Rect>() }
+    val target = selectedKey?.let { bounds[it] }
+    val thumbX = remember { Animatable(0f) }
+    val thumbWidth = remember { Animatable(0f) }
+    LaunchedEffect(target) {
+        val to = target ?: return@LaunchedEffect
+        if (thumbWidth.value == 0f) {
+            // First placement lands where it belongs; sliding in from the edge would announce a
+            // change that never happened.
+            thumbX.snapTo(to.left)
+            thumbWidth.snapTo(to.width)
+        } else {
+            val spec = spring<Float>(dampingRatio = 0.8f, stiffness = 500f)
+            launch { thumbX.animateTo(to.left, spec) }
+            launch { thumbWidth.animateTo(to.width, spec) }
+        }
+    }
+    val thumbColor = colors.accentTertiary
     Row(
         modifier = modifier
             .clip(DsShapes.pillFull)
@@ -72,7 +107,18 @@ fun DsSegmented(
             // `bgLayer2` — so on a sheet the fill vanishes and the control collapses back into the
             // row of bare words this component exists to stop being.
             .border(1.dp, colors.borderL2, DsShapes.pillFull)
-            .padding(2.dp),
+            .padding(2.dp)
+            // After the padding, so it draws in the same space the segments are placed in.
+            .drawBehind {
+                val placed = target ?: return@drawBehind
+                if (thumbWidth.value <= 0f) return@drawBehind
+                drawRoundRect(
+                    color = thumbColor,
+                    topLeft = Offset(thumbX.value, placed.top),
+                    size = Size(thumbWidth.value, placed.height),
+                    cornerRadius = CornerRadius(placed.height / 2f),
+                )
+            },
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         segments.forEach { segment ->
@@ -87,7 +133,9 @@ fun DsSegmented(
                 // small thing to hit when it is the first decision on a screen.
                 minHeight = minSegmentHeight ?: if (stretch) 36.dp else 24.dp,
                 maxLabelLines = maxLabelLines,
-                modifier = Modifier.weight(1f, fill = stretch),
+                modifier = Modifier
+                    .weight(1f, fill = stretch)
+                    .onPlaced { bounds[segment.key] = Rect(it.positionInParent(), it.size.toSize()) },
             )
         }
     }
@@ -105,28 +153,28 @@ private fun DsSegment(
     modifier: Modifier = Modifier,
 ) {
     val colors = DsTheme.colors
-    val emphasis by animateFloatAsState(
-        targetValue = if (selected) 1f else 0f,
-        animationSpec = DsAnimations.tabSwap,
-        label = "segment",
+    // The fill itself is the track's sliding thumb; a segment only tints its label.
+    val labelColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.labelDimmed
+            selected -> colors.accent
+            else -> colors.labelTertiary
+        },
+        animationSpec = DsAnimations.tabSwapColor,
+        label = "segmentLabel",
     )
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .heightIn(min = minHeight)
             .clip(DsShapes.pillFull)
-            .background(colors.accentTertiary.copy(alpha = emphasis))
             .selectable(selected = selected, enabled = enabled, role = role, onClick = onClick)
             .padding(horizontal = DsSpacing.medium, vertical = DsSpacing.tiny),
     ) {
         Text(
             label,
             style = DsType.tabText,
-            color = when {
-                !enabled -> colors.labelDimmed
-                selected -> colors.accent
-                else -> colors.labelTertiary
-            },
+            color = labelColor,
             maxLines = maxLabelLines,
             overflow = TextOverflow.Ellipsis,
         )
