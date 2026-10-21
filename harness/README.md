@@ -1,6 +1,6 @@
 # LAN setup for DSH Mobile
 
-This guide targets harness `0.2.1-alpha.2`. The patch instructions below remain
+This guide targets harness `0.2.1-rc.2`. The patch instructions below remain
 available for `0.2.0-rc.1`, `0.1.7-rc.x`, and `0.1.6-alpha.x`.
 
 The harness authenticates every API call and WebSocket stream. On startup it prints a
@@ -19,8 +19,8 @@ For USB or an emulator, keep the default loopback listener and run
 `adb reverse tcp:3080 tcp:3080`, then connect to `127.0.0.1:3080` and sign in.
 No LAN patch is needed.
 
-The web listener defaults to `127.0.0.1`. Alpha.2 accepts a specific IPv4 or IPv6
-bind address, so a LAN connection no longer needs a patch:
+The web listener defaults to `127.0.0.1`. Since 0.2.1-alpha.2 it accepts a specific IPv4
+or IPv6 bind address, so a LAN connection no longer needs a patch:
 
 ```sh
 dsh web --host 192.168.1.20

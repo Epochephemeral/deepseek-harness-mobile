@@ -777,8 +777,15 @@ class DshApiClient(
     suspend fun terminalList(sessionId: String): RpcResult<List<WebTerminalInfo>> = call("terminal/list", args { put("sessionId", JsonPrimitive(sessionId)) })
     suspend fun terminalCreate(sessionId: String, request: TerminalCreateRequest): RpcResult<WebTerminalInfo> =
         call("terminal/create", JsonObject(terminalArgs(sessionId) + ("request" to encodeToJsonElement(TerminalCreateRequest.serializer(), request))))
+    /** Arguments for the duplex `terminal/attach` stream (harness 0.2.1-alpha.3 and later). */
+    fun terminalAttachArgs(sessionId: String, id: String): JsonObject = JsonObject(terminalArgs(sessionId, id))
+    /** Arguments for the pre-alpha.3 `terminal/follow` stream, kept for older hosts. */
+    fun terminalFollowArgs(sessionId: String, id: String, attachmentId: String): JsonObject =
+        JsonObject(terminalArgs(sessionId, id, attachmentId))
+    /** Pre-alpha.3 only: duplex hosts take input on the `terminal/attach` uplink and 404 this. */
     suspend fun terminalWrite(sessionId: String, id: String, attachmentId: String, data: String): RpcResult<JsonElement> =
         call("terminal/write", JsonObject(terminalArgs(sessionId, id, attachmentId) + ("data" to JsonPrimitive(data))))
+    /** Pre-alpha.3 only, like [terminalWrite]. */
     suspend fun terminalResize(sessionId: String, id: String, attachmentId: String, cols: Int, rows: Int): RpcResult<JsonElement> =
         call("terminal/resize", JsonObject(terminalArgs(sessionId, id, attachmentId) + mapOf("cols" to JsonPrimitive(cols), "rows" to JsonPrimitive(rows))))
     suspend fun terminalRename(sessionId: String, id: String, title: String): RpcResult<JsonElement> =

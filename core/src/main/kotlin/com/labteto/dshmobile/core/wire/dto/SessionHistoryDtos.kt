@@ -686,7 +686,9 @@ object WorkspaceFollowFrameSerializer : KSerializer<WorkspaceFollowFrame> {
     override fun deserialize(decoder: Decoder): WorkspaceFollowFrame {
         val json = (decoder as JsonDecoder).decodeJsonElement().jsonObject
         return when (val type = json["type"]?.jsonPrimitive?.contentOrNull ?: "") {
-            "baseline" -> {
+            // `replace` (harness 0.2.1-alpha.3) restates the whole baseline mid-stream, for a peer
+            // whose visible set changed. Applying it as a fresh baseline is exactly its meaning.
+            "baseline", "replace" -> {
                 val value = json["value"] as? JsonObject
                 if (value == null) decodeFromJsonElement(WorkspaceFollowFrame.Baseline.serializer(), json)
                 else WorkspaceFollowFrame.Baseline(

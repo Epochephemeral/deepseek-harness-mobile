@@ -660,6 +660,7 @@ private fun SessionRowItem(
     var menuOpen by remember { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
     var archiveConfirmOpen by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var archiveBusy by remember { mutableStateOf<com.labteto.dshmobile.data.ArchiveOutcome.Busy?>(null) }
     val chevronRotation by animateFloatAsState(
         targetValue = if (childrenExpanded) 90f else 0f,
@@ -676,10 +677,10 @@ private fun SessionRowItem(
                 .background(if (isCurrent) colors.sidebarNavActive else androidx.compose.ui.graphics.Color.Transparent)
                 .combinedClickable(
                     onClick = {
-                        scope.launch {
-                            store.openSession(session.sessionId)
-                            onClose()
-                        }
+                        // Close first. Waiting for the session to load before the drawer moved made
+                        // every switch feel like a stall; the transcript shows its own skeleton.
+                        onClose()
+                        scope.launch { store.openSession(session.sessionId) }
                     },
                     onLongClick = { menuOpen = true },
                 )
@@ -782,6 +783,10 @@ private fun SessionRowItem(
                         menuOpen = false
                         scope.launch { store.setPinned(session.sessionId, !pinned) }
                     }
+                }
+                SheetRow(title = stringResource(R.string.chatlist_session_copy_id)) {
+                    menuOpen = false
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(session.sessionId))
                 }
                 SheetRow(title = stringResource(R.string.chatlist_session_archive)) {
                     menuOpen = false
@@ -1006,7 +1011,7 @@ internal fun indexSubagents(
 }
 
 /** Display title: an explicit title, else the working directory's folder, else the id. */
-private fun displaySessionTitle(session: SessionRow): String =
+internal fun displaySessionTitle(session: SessionRow): String =
     sessionTitle(session).let { if (session.title.isNullOrBlank()) technicalDisplay(it) else it }
 
 internal fun sessionTitle(session: SessionRow): String {

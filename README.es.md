@@ -1,14 +1,11 @@
 <p align="center">
-  <img src="docs/images/banner.jpg" alt="DSH Mobile — el DeepSeek Harness en tu bolsillo" width="100%">
+  <img src="docs/images/banner.jpg" alt="DSH Mobile, el DeepSeek Harness en tu teléfono" width="100%">
 </p>
 
-<h1 align="center">DSH Mobile — Control remoto del DeepSeek Harness</h1>
+<h1 align="center">DSH Mobile</h1>
 
 <p align="center">
-  Una aplicación complementaria de código abierto para Android que te lleva tu
-  <b>DeepSeek Harness</b> en el bolsillo.<br>
-  Dirige sesiones, revisa planes y objetivos, responde aprobaciones y preguntas, y recibe
-  notificaciones cuando el harness termina — desde el teléfono, por tu red local.
+  Una aplicación de Android para manejar un <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> desde tu teléfono.
 </p>
 
 <p align="center">
@@ -28,158 +25,162 @@
   <a href="README.th.md">ไทย</a>
 </p>
 
-DSH Mobile es una **aplicación complementaria no oficial** para el
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT) que replica su GUI web
-función por función, en el propio lenguaje visual del harness. Solo Android, Kotlin + Jetpack
-Compose.
+El DeepSeek Harness es un agente de programación con IA que se ejecuta en tu ordenador y tiene una
+interfaz web. DSH Mobile se conecta a ese harness y te da los mismos controles en una aplicación
+nativa de Android. Puedes empezar una tarea sentado frente al ordenador y luego, desde el teléfono,
+seguirla, responder a sus preguntas y aprobar sus comandos.
 
-Su contraparte en el otro extremo es
-[**dsh-relay**](https://github.com/sorsama/deepseek-harness-relay), un plugin del harness que añade
-la capa de autenticación que el propio harness reconoce no tener, para que esta aplicación llegue a
-un harness con una credencial real y una clave fijada en lugar de un puerto abierto. Consulta
-[Relay](https://github.com/sorsama/deepseek-harness-mobile/wiki/Relay).
+Es una aplicación no oficial, hecha por la comunidad. Necesita un harness en ejecución en algún
+lugar al que pueda llegar: en tu ordenador o en el propio teléfono a través de Termux.
 
-**[dshm.zyphite.com](https://dshm.zyphite.com)** es el sitio del proyecto: qué es la aplicación,
-cómo se ve y cómo ponerla en marcha, todo en una página.
+El [sitio del proyecto](https://dshm.zyphite.com) ofrece una presentación en una sola página, y la
+[wiki](https://github.com/sorsama/deepseek-harness-mobile/wiki) tiene la guía de uso completa.
 
-La [**wiki**](https://github.com/sorsama/deepseek-harness-mobile/wiki) es la guía para quien la
-usa: [primeros pasos](https://github.com/sorsama/deepseek-harness-mobile/wiki/Getting-Started),
-[conexión](https://github.com/sorsama/deepseek-harness-mobile/wiki/Connecting),
-[solución de problemas](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting),
-un [recorrido por las funciones](https://github.com/sorsama/deepseek-harness-mobile/wiki/Feature-Tour)
-y las [preguntas frecuentes](https://github.com/sorsama/deepseek-harness-mobile/wiki/FAQ).
+## Capturas de pantalla
 
----
+| Conectar | Chat | Trayectoria | Detalles |
+|:--:|:--:|:--:|:--:|
+| <img src="docs/images/home.png" width="200" alt="Pantalla de conexión con un enlace de dsh web pegado en el campo de dirección"> | <img src="docs/images/chat.png" width="200" alt="Una respuesta llegando en streaming mientras la barra superior dice Trabajando y se ve el botón Detener"> | <img src="docs/images/trajectory.png" width="200" alt="Pestaña Trayectoria con todas las llamadas a herramientas del primer turno"> | <img src="docs/images/session-info.png" width="200" alt="Panel Detalles con la sesión, su modelo, el uso del contexto y la actividad"> |
+| Pega el enlace que imprime el harness y quedas conectado y con la sesión iniciada. | Las respuestas llegan en streaming. Las llamadas a herramientas se agrupan en una fila que puedes abrir. | Cada llamada a herramienta, turno a turno. | El modelo, el contexto, el objetivo, el modo plan y los trabajos de la sesión. |
 
-## Capturas
-
-| Conectar | Chat | Trayectoria |
+| Subagentes | Terminal | Tema oscuro |
 |:--:|:--:|:--:|
-| <img src="docs/images/home.png" width="240" alt="Pantalla de conexión: harnesses recientes con alcance en vivo, descubrimiento, entrada manual y opciones de conexión automática"> | <img src="docs/images/chat.png" width="240" alt="Chat: turnos en streaming con un icono por herramienta, tarjetas de herramienta, panel de objetivo y compositor"> | <img src="docs/images/trajectory.png" width="240" alt="Trayectoria: un registro por turno con totales de uso"> |
-| Harnesses recientes con alcance en vivo, descubrimiento en la LAN, `host:port` manual, conexión automática. | Turnos en streaming, un glifo por herramienta, tarjetas de herramienta desplegables, selector de permisos. | La misma sesión como registro turno a turno, con totales de uso. |
+| <img src="docs/images/subagent.png" width="200" alt="La transcripción de un subagente con sus hallazgos y un cuadro para escribir un mensaje de seguimiento"> | <img src="docs/images/terminal.png" width="200" alt="Una terminal en el ordenador del harness con una ejecución de pruebas superada"> | <img src="docs/images/dark.png" width="200" alt="El chat con el tema oscuro"> |
+| Lee lo que hizo un subagente y envíale un mensaje de seguimiento. | Un shell real en el ordenador del harness. | Claro, oscuro o el del sistema. |
 
-| Detalles de la sesión | Subagentes |
-|:--:|:--:|
-| <img src="docs/images/session-info.png" width="240" alt="Panel de detalles: desglose del contexto, objetivo, modo plan, trabajos, cola, subagentes, información del host"> | <img src="docs/images/subagent.png" width="240" alt="Catálogo de subagentes, con hijos que se pueden continuar"> |
-| Desglose del contexto, objetivo, modo plan, trabajos en segundo plano, turnos en cola, información del host, exportación del registro de sesión. | El catálogo de subagentes: abre la transcripción de un hijo, haz un seguimiento o interrúmpelo. |
+## Qué puedes hacer
 
-## Funciones
+- Chatear con el agente. Las respuestas llegan en streaming con su razonamiento, los bloques de
+  código y las llamadas a herramientas. Puedes adjuntar fotos y archivos, mencionar archivos con
+  `@` y ejecutar comandos y habilidades con `/`.
+- Responder a lo que el agente necesita de ti: aprobar o rechazar un comando, contestar sus
+  preguntas y revisar un plan antes de que empiece.
+- Seguir de cerca los trabajos largos. Los objetivos, las listas de tareas pendientes, los
+  mensajes en cola, los trabajos en segundo plano y los subagentes tienen cada uno su propia
+  vista, y puedes pausarlos, dirigirlos o detenerlos.
+- Recibir una notificación cuando termina un turno, cuando un objetivo se completa o se bloquea, o
+  cuando el agente espera una respuesta. La conexión se mantiene activa en segundo plano.
+- Explorar y previsualizar los archivos del espacio de trabajo, y abrir una terminal en el
+  ordenador del harness.
+- Gestionar el propio harness: modelos, preajustes de agente, plugins, tareas programadas y
+  sesiones archivadas.
+- Usar la aplicación en inglés, chino, hindi, español, francés, árabe, bengalí, portugués, ruso,
+  urdu o tailandés. Admite idiomas que se escriben de derecha a izquierda.
 
-- **Conexión sin fricción** — descubre automáticamente un harness en tu Wi-Fi (escaneo activo de
-  la subred + handshake de disponibilidad), recuerda los hosts y comprueba si responden al entrar,
-  admite `host:port` manual, loopback para configuraciones en el mismo dispositivo, y opciones de
-  conexión automática (último usado / LAN / mismo dispositivo).
-- **Navegación estilo Discord** — desliza hacia la derecha desde el borde izquierdo para abrir la
-  lista de chats agrupada por espacio de trabajo, hacia la izquierda para cerrarla, y desde el
-  borde derecho hacia la izquierda para el panel de detalles de la sesión.
-- **Experiencia de chat completa** — turnos en streaming con el razonamiento desplegable, markdown,
-  tarjetas de herramienta de terminal/diff/lectura/búsqueda/web, panel de cola (editar / quitar /
-  redirigir), paginación del historial, imágenes y archivos adjuntos.
-- **Comandos de barra y habilidades** — al escribir `/` aparecen sobre el compositor los comandos
-  y las habilidades de la sesión. El compositor coteja una línea que empieza por `/` con el
-  catálogo de comandos de la propia sesión y la ejecuta a través de la pasarela de comandos del
-  harness; lo que el catálogo no reclama se envía como prompt, que es la forma de invocar las
-  habilidades. Con el plugin dsh-rewind en el harness, `/rewind` abre un selector.
-- **Todo lo que hace la GUI** — objetivos (fases, rondas, pausar/reanudar/editar), modo plan y
-  revisión del plan, aprobaciones de permisos, preguntas al usuario, panel de tareas pendientes,
-  subagentes (catálogo, seguimientos, interrupción), trabajos en segundo plano, ejecuciones de
-  flujos de trabajo, habilidades, selección de modelo, preajustes de agente, búsqueda en la sesión,
-  registro de trayectoria, exportación de la sesión, valoración de mensajes.
-- **Notificaciones** — turno completado, objetivo completado / bloqueado, una revisión o una
-  pregunta esperándote; conexión en segundo plano mediante un servicio en primer plano.
-- **Se ve como el harness** — exactamente los mismos tokens de diseño del DeepSeek Harness
-  (colores, tipografía, radios, filas desplegables, shimmer, botones de tinta) con temas claro /
-  oscuro / del sistema.
-- **11 idiomas** — English, 中文, हिन्दी, Español, Français, العربية, বাংলা, Português, Русский,
-  اردو, ไทย (con soporte RTL).
+El [registro de cambios](CHANGELOG.md) recoge lo que cambió en cada versión.
 
-## Requisitos
+## Primeros pasos
 
-- Android 8.0 o superior (minSdk 26).
-- Un [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) en ejecución
-  en la versión `0.2.1-alpha.2`, la base del protocolo de DSH Mobile `0.16.0`.
-  Se mantienen las adaptaciones de compatibilidad para `0.2.0-rc.1`, `0.1.7-rc.x` y
-  `0.1.6-alpha.x`; las nuevas funciones de gestión necesitan soporte del harness.
-  Consulta la [compatibilidad](docs/COMPATIBILITY.md) y la
-  [validación de 0.13.0](docs/VALIDATION-0.13.0.md) para saber qué se ha comprobado.
+### 1. Instala la aplicación
 
-## Inicio rápido
+Descarga el APK desde la [última versión](https://github.com/sorsama/deepseek-harness-mobile/releases/latest)
+e instálalo. Necesitas Android 8.0 o posterior.
 
-1. Instala el último APK desde
-   [Releases](https://github.com/sorsama/deepseek-harness-mobile/releases/latest).
-2. Abre la aplicación y elige cómo conectar. No son variantes de un mismo ajuste: escoge el que
-   coincida con lo que hayas configurado en el ordenador.
+### 2. Haz que el harness sea accesible
 
-   **Relé** — cifrado, autenticado y funciona incluso fuera de tu Wi-Fi. Instala
-   [`dsh-relay`](https://github.com/sorsama/deepseek-harness-relay) en el perfil web del harness:
+De forma predeterminada, el harness solo escucha en su propio ordenador. Elige la configuración
+que corresponda al lugar donde vaya a estar tu teléfono.
 
-   ```sh
-   dsh plugin --profile web add dsh-relay
-   dsh web
-   ```
+#### En la misma Wi-Fi que el ordenador
 
-   Abre la URL que imprime **en ese mismo ordenador**, establece una contraseña y luego abre
-   `/relay/pair`. En la aplicación: **Relé → Emparejar un relé**, y escanea el QR. Cuando todos
-   los clientes que uses estén emparejados, desactiva `compat.addressGrants` en el relé: aquí
-   nada lo necesita.
-
-   **Red local** — sin configuración en el teléfono y sin autenticación alguna. Aplica el parche
-   de LAN de un solo archivo de [`harness/README.md`](harness/README.md), reinicia `dsh web` y
-   toca **Escanear red**. Solo en redes de confianza.
-
-   **Detrás de tu propio proxy inverso HTTPS** — pega la dirección `https://` en el modo de red
-   local. El proxy puede reenviar al loopback, así que el harness no necesita parche; pero cifra
-   el enlace sin autenticar a nadie. Consulta [`harness/README.md`](harness/README.md).
-
-   **USB / emulador** — `dsh web`, luego `adb reverse tcp:3080 tcp:3080`, y conéctate a
-   `127.0.0.1:3080` en el modo de red local. No hace falta parche.
-3. Elige una sesión, chatea y recibe una notificación cuando el harness termine.
-
-Si falla un intento de conexión, la aplicación indica la causa; la página de
-[solución de problemas](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting)
-de la wiki está organizada por esa misma frase.
-
-## Compatibilidad y seguridad
-
-> **0.1.2:** Desde el harness 0.1.2 el harness autentica toda su API: pega una vez el enlace que imprime al arrancar cuando la app lo pida. Eso autentica el teléfono, pero no cifra la conexión, así que sigue siendo solo para redes de confianza.
-
-- Consulta [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) para la matriz de versiones del harness
-  y las superficies disponibles solo por loopback.
-- **Lee primero [docs/SECURITY.md](docs/SECURITY.md).** El harness a secas no tiene autenticación,
-  así que el modo de red local es solo para redes de confianza — por eso mismo la aplicación lo
-  advierte en la pantalla de conexión. El modo relé añade una credencial real y un certificado
-  fijado, pero autenticarse sigue otorgando el mismo poder que un shell en ese ordenador, porque
-  es allí donde el agente ejecuta los comandos.
-
-## Compilación
+Inicia el harness en la dirección de red local del ordenador. En el harness 0.2.1-alpha.2 y
+posteriores:
 
 ```sh
-./gradlew :app:assembleDebug      # APK de depuración
-./gradlew :app:assembleRelease    # APK de publicación (firmado si el entorno del keystore está definido)
+dsh web --host 192.168.1.20
 ```
 
-La versión publicada procede de la etiqueta de git: el flujo de publicación exporta
-`DSH_VERSION_NAME` a partir del nombre de la etiqueta y `versionCode` se deriva de ahí. Una
-compilación local recurre al literal de `app/build.gradle.kts`.
+Usa la dirección real de tu ordenador en lugar de `192.168.1.20`. El harness imprime una línea
+como `dsh web: http://192.168.1.20:3080/?token=…`. En la aplicación, elige **Red local**, pega
+ese enlace completo en el campo de dirección (o toca el botón Pegar) y toca **Conectar**. El token
+del enlace inicia la sesión en el teléfono, y a partir de ahí el harness aparece en **Recientes**
+para la próxima vez. Las versiones anteriores del harness necesitan un pequeño parche en lugar de
+`--host`; consulta [`harness/README.md`](harness/README.md).
 
-Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para el ciclo de desarrollo contra un harness real, la
-distribución de módulos y el flujo de publicación.
+#### Fuera de casa
 
-## Repositorio
+Instala [dsh-relay](https://github.com/sorsama/deepseek-harness-relay), un plugin del harness que
+añade contraseña, cifrado y emparejamiento de dispositivos. Después elige **Relé** en la
+aplicación y escanea el código QR de emparejamiento. La [página Relay de la wiki](https://github.com/sorsama/deepseek-harness-mobile/wiki/Relay)
+explica el proceso paso a paso.
 
-| Ruta | Qué contiene |
+#### Cable USB o emulador
+
+Ejecuta `dsh web` en el ordenador y `adb reverse tcp:3080 tcp:3080`. En la aplicación, elige
+**Este teléfono** e inicia sesión con el enlace que imprimió `dsh web`.
+
+#### En el propio teléfono
+
+El harness puede ejecutarse en [Termux](https://f-droid.org/packages/com.termux/).
+Elige **Este teléfono** y la aplicación podrá iniciar y detener el harness e iniciar sesión por
+ti. Configurar Node en Termux todavía no funciona en todos los dispositivos; lee antes
+[`harness/TERMUX.md`](harness/TERMUX.md).
+
+#### Tu propio proxy inverso HTTPS
+
+Pega su dirección `https://` en el modo **Red local**. El proxy cifra la conexión, pero no
+comprueba quién se conecta. Consulta [`harness/README.md`](harness/README.md).
+
+### 3. Empieza a trabajar
+
+Elige una sesión de la lista (desliza desde el borde izquierdo) o empieza una nueva. Si una
+conexión falla, la aplicación te dice por qué, y la
+[página de solución de problemas](https://github.com/sorsama/deepseek-harness-mobile/wiki/Troubleshooting)
+de la wiki está organizada según esos mensajes.
+
+## Seguridad
+
+Lee [docs/SECURITY.md](docs/SECURITY.md) antes de conectarte a través de una red. Un teléfono con
+la sesión iniciada puede hacer todo lo que puede hacer el agente, y el agente ejecuta comandos en
+tu ordenador. Iniciar sesión equivale a dar acceso a un shell.
+
+- El modo Red local comprueba el token de inicio de sesión, pero no cifra nada. Úsalo solo en una
+  red de confianza.
+- El modo Relé añade cifrado y un certificado fijado, y funciona desde fuera de tu red.
+- Mantén en privado el enlace de `dsh web`. Cualquiera que lo tenga puede iniciar sesión hasta que el
+  harness se reinicie.
+
+## Compatibilidad
+
+DSH Mobile se prueba con **DeepSeek Harness 0.2.1-rc.2**. Las versiones anteriores del harness,
+hasta la 0.1.6, siguen funcionando en su mayor parte, pero las funciones nuevas necesitan un
+harness más reciente. La [tabla de compatibilidad](docs/COMPATIBILITY.md) indica qué versión de la
+aplicación corresponde a cada versión del harness.
+
+## Compilar desde el código fuente
+
+```sh
+./gradlew :app:assembleDebug      # debug APK
+./gradlew :app:assembleRelease    # release APK, signed when the keystore environment is set
+./gradlew :core:test :app:testDebugUnitTest
+```
+
+Para comprobar la aplicación con un harness real, compila una copia local del repositorio del
+harness y ejecuta la suite de conformidad:
+
+```sh
+DSH_HARNESS_SRC=/path/to/deepseek-harness ./gradlew :conformance:test
+```
+
+Las compilaciones de publicación toman la versión de la etiqueta de git.
+[CONTRIBUTING.md](CONTRIBUTING.md) explica el ciclo de desarrollo, la organización de los módulos
+y los pasos para publicar una versión.
+
+| Ruta | Contenido |
 |---|---|
-| `core/` | Núcleo del protocolo en JVM puro: DTO del protocolo, cliente RPC, enlaces WebSocket, bucle de reconexión, plegado de sesiones, clasificador de notificaciones |
-| `app/` | Interfaz de Android: pantallas, descubrimiento/conexión, servicio en primer plano, notificaciones, i18n |
-| `mock-harness/` | Simulación en Ktor del servidor `/api` del harness para las pruebas |
-| `tools/capture/` | Graba tráfico real del harness como fixtures de conformidad |
-| `harness/` | Parche complementario y guía para el modo LAN |
-| — | El relé en sí vive en [sorsama/deepseek-harness-relay](https://github.com/sorsama/deepseek-harness-relay) |
+| `app/` | La aplicación de Android: pantallas, conexión, notificaciones, traducciones |
+| `core/` | Código del protocolo en Kotlin puro: tipos de datos del protocolo, clientes RPC y de streams, lógica de reconexión, el plegado de eventos de la sesión |
+| `conformance/` | Pruebas que arrancan un harness real y comprueban cada llamada que hace la aplicación |
+| `mock-harness/` | Un pequeño servidor de harness simulado para las pruebas |
+| `tools/capture/` | Graba tráfico real del harness como fixtures de prueba |
+| `harness/` | Guías de configuración para la red local y Termux |
 | `docs/` | [Arquitectura](docs/ARCHITECTURE.md), [notas del protocolo](docs/PROTOCOL.md), [compatibilidad](docs/COMPATIBILITY.md), [seguridad](docs/SECURITY.md) |
+
+El plugin del relé está en su propio repositorio,
+[sorsama/deepseek-harness-relay](https://github.com/sorsama/deepseek-harness-relay).
 
 ## Licencia
 
-[MIT](LICENSE). El material de terceros incluido se enumera en
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). El DeepSeek Harness y su marca son propiedad de
-sus respectivos titulares; este proyecto es un control remoto independiente, hecho por la
-comunidad.
+[MIT](LICENSE). El material de terceros incluido en la aplicación se enumera en
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). DeepSeek Harness y su marca pertenecen a sus
+propietarios. Este proyecto no está afiliado a ellos.

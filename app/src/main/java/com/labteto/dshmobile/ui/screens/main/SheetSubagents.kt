@@ -18,7 +18,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +26,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Arrangement
+import com.labteto.dshmobile.ui.components.DsSegment
+import com.labteto.dshmobile.ui.components.DsSegmented
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -146,13 +148,32 @@ internal fun SubagentsSheet(
                     }
                 }
 
-                TextButton(onClick = { childPanel = true }) { Text(stringResource(R.string.panel_workspace)) }
+                // The child's own controls, as controls: a button for its workspace and a segmented
+                // choice for how a follow-up is delivered. They used to be three bare text buttons in
+                // a row, with a check mark typed into the label as the only sign of which was on.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpacing.small)) {
+                    if (mode == "continuable") {
+                        DsSegmented(
+                            segments = listOf(
+                                DsSegment("queue", stringResource(R.string.chat_queue_placement_queued)),
+                                DsSegment("steer", stringResource(R.string.chat_queue_placement_steering)),
+                            ),
+                            selectedKey = delivery,
+                            onSelect = { delivery = it },
+                            enabled = !sending && !queueOperation.value,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    DsButton(
+                        text = stringResource(R.string.panel_workspace),
+                        icon = com.labteto.dshmobile.ui.components.FeatherIcons.Folder,
+                        onClick = { childPanel = true },
+                        variant = DsButtonVariant.Outline,
+                        size = DsButtonSize.Small,
+                    )
+                }
                 if (mode == "continuable") {
                     QueueDock(queues[child.sessionId].orEmpty(), store, sessionId = child.sessionId, blocked = sending, operationState = queueOperation)
-                    Row {
-                        TextButton(onClick = { delivery = "queue" }, enabled = !sending && !queueOperation.value) { Text((if (delivery == "queue") "✓ " else "") + stringResource(R.string.chat_queue_title)) }
-                        TextButton(onClick = { delivery = "steer" }, enabled = !sending && !queueOperation.value) { Text((if (delivery == "steer") "✓ " else "") + stringResource(R.string.chat_queue_steer)) }
-                    }
                 }
                 if (mode != "continuable") {
                     Text(

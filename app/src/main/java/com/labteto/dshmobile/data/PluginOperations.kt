@@ -81,14 +81,14 @@ class PluginOperations(
 
     @Synchronized
     fun install(host: String, spec: String, registry: String?, approvedBuilds: List<String>? = null,
-                enabled: Boolean = false, saveExact: Boolean? = null) {
+                enabled: Boolean = false, saveExact: Boolean? = null, replaces: String? = null) {
         if (busy(host) || !available()) return
         val id = UUID.randomUUID().toString()
         _pending.value += PluginOperationState(host, id, busy = true, subject = spec, registry = registry,
             enabled = enabled, saveExact = saveExact)
         persistPending()
         launchAttempt(host, id) { version ->
-            try { finish(host, id, version, call(host) { it.installPlugin(spec, PluginInstallOptions(enabled = enabled, requestId = id, registry = registry, approvedBuilds = approvedBuilds, saveExact = saveExact)) }) }
+            try { finish(host, id, version, call(host) { it.installOrReplacePlugin(spec, PluginInstallOptions(enabled = enabled, requestId = id, registry = registry, approvedBuilds = approvedBuilds, saveExact = saveExact), replaces) }) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { revise(host, id, version) { it.copy(busy = false, unknown = true, error = e.message) } }
         }

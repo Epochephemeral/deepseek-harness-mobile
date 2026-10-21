@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +65,7 @@ import com.labteto.dshmobile.ui.screens.main.commands.SlashMenu
 import com.labteto.dshmobile.ui.screens.main.commands.SlashRow
 import com.labteto.dshmobile.ui.screens.main.commands.activeSlash
 import com.labteto.dshmobile.ui.theme.DsAnimations
+import com.labteto.dshmobile.ui.components.AnimatedPresence
 import com.labteto.dshmobile.ui.theme.DsTheme
 import androidx.compose.ui.res.stringResource
 import com.labteto.dshmobile.R
@@ -131,6 +133,7 @@ fun ChatScreen(
     }
     var referencePicker by remember(composer.key) { mutableStateOf<AtQuery?>(null) }
     var draft by composer::text
+    var sentTick by remember { mutableIntStateOf(0) }
     var mode by composer::mode
     var tab by rememberSaveable { mutableStateOf(ChatTab.Chat) }
     val attachments = composer.attachments
@@ -330,6 +333,7 @@ fun ChatScreen(
 
     fun send(text: String) {
         if (composer.preparing || composer.submitting) { draft = text; return }
+        sentTick++
         if (attachments.isEmpty() && dispatchDecorated(text)) return
         val delivery = mode
         val targetId = composer.key.sessionId
@@ -464,11 +468,15 @@ fun ChatScreen(
                 historyEnabled = currentSessionId != null,
             )
 
-            connectionError?.let {
-                androidx.compose.material3.TextButton(onClick = { store.retryConnection() }) { ConnectionBanner(it) }
+            AnimatedPresence(connectionError) {
+                ConnectionBanner(
+                    message = it,
+                    actionLabel = stringResource(R.string.common_retry),
+                    onAction = { store.retryConnection() },
+                )
             }
-            if (conversation?.gap == true) {
-                ConnectionBanner(stringResource(R.string.common_reconnecting))
+            AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null }) {
+                ConnectionBanner(stringResource(R.string.common_reconnecting), warning = true)
             }
 
             val nodeContext = ChatNodeContext(
@@ -516,6 +524,12 @@ fun ChatScreen(
                             onLoadOlder = { scope.launch { store.loadOlder() } },
                             jumpToSeq = pendingJumpSeq,
                             onJumpConsumed = { pendingJumpSeq = null },
+                            sentTick = sentTick,
+                            onSuggestion = if (currentSessionId != null) {
+                                { text -> draft = text; composer.selection = text.length }
+                            } else {
+                                null
+                            },
                         )
                         ChatTab.Trajectory -> TrajectoryTab(
                             conversation = conversation,
@@ -523,6 +537,9 @@ fun ChatScreen(
                             usage = tokenUsage,
                             cwd = workingDirectory,
                             listState = trajectoryListState,
+                            loadingOlder = loadingOlder,
+                            loadOlderFailed = loadOlderFailed,
+                            onLoadOlder = { scope.launch { store.loadOlder() } },
                         )
                     }
                 }
@@ -534,16 +551,18 @@ fun ChatScreen(
                             .padding(horizontal = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        parseTodos(conv.projections["todos"])?.let { TodoDock(it) }
-                        parseGoal(conv.projections["goal"])?.let { GoalBar(it, store) }
-                        QueueDock(conv.queue, store)
+                        // Each dock slides in and out on its own, so one arriving mid-turn eases the
+                        // transcript up rather than shoving it by a whole row in a single frame.
+                        AnimatedPresence(parseTodos(conv.projections["todos"])?.takeIf { it.isNotEmpty() }) { TodoDock(it) }
+                        AnimatedPresence(parseGoal(conv.projections["goal"])) { GoalBar(it, store) }
+                        AnimatedPresence(conv.queue.takeIf { it.isNotEmpty() }) { QueueDock(it, store) }
                     }
                 }
 
                 // Server-initiated requests take over the bottom of the screen: they block the turn,
                 // so burying them behind a scroll would strand the session.
-                val approval = pendingApproval
-                if (approval != null && approval.sessionId == currentSessionId) {
+                val approval = pendingApproval?.takeIf { it.sessionId == currentSessionId }
+                AnimatedPresence(approval, enter = DsAnimations.cardEnter, exit = DsAnimations.cardExit) { approval ->
                     // A refusal is said out loud here rather than swallowed, for the reason [refusalOf]
                     // gives: the host's wait — and the tool call behind it — stays open, and a panel
                     // that reported nothing would read as two buttons that do nothing.
@@ -558,8 +577,8 @@ fun ChatScreen(
                         onReject = { decide(false) },
                     )
                 }
-                val questions = pendingQuestions
-                if (questions != null && questions.sessionId == currentSessionId) {
+                val questions = pendingQuestions?.takeIf { it.sessionId == currentSessionId }
+                AnimatedPresence(questions, enter = DsAnimations.cardEnter, exit = DsAnimations.cardExit) { questions ->
                     var planBusy by remember(questions.rpcId) { mutableStateOf(false) }
                     // A plan review rides the question channel but is a different decision, so it gets
                     // the card built for it. The narrowing decides which — and hands back anything the
@@ -614,7 +633,7 @@ fun ChatScreen(
 
                 // The `/` autocomplete sits where the web's does: directly above the composer,
                 // only while the draft is a slash token being typed.
-                activeSlash(draft, composer.selection)?.let { slash ->
+                AnimatedPresence(activeSlash(draft, composer.selection)) { slash ->
                     SlashMenu(
                         query = slash,
                         commands = if (commandsAvailable) commands else emptyList(),

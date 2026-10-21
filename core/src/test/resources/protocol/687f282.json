@@ -1,0 +1,15 @@
+{
+  "upstreamCommit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "release": "0.2.1-rc.2",
+  "terminalEnvironment": {"cwd":"/work","maxInputBytes":65536,"maxBufferedBytes":262144,"maxCols":500,"maxRows":200,"scrollback":5000},
+  "terminalSnapshot": {"type":"snapshot","sequence":4,"screen":"$ ","writable":true,"inputWindow":{"maxBytes":65536,"frameOverheadBytes":35},"info":{"id":"t1","title":"pwsh","shell":{"path":"/usr/bin/pwsh","args":[],"name":"PowerShell"},"cwd":"/work","cols":80,"rows":24,"state":"running","exitCode":null}},
+  "terminalOutput": {"type":"output","sequence":5,"data":"hello\r\n"},
+  "terminalState": {"type":"state","writable":false,"info":{"id":"t1","title":"pwsh","shell":{"path":"/usr/bin/pwsh","args":[],"name":"PowerShell"},"cwd":"/work","cols":100,"rows":30,"state":"running","exitCode":null}},
+  "terminalAck": {"type":"ack","sequence":1},
+  "terminalRefusedAck": {"type":"ack","sequence":2,"refusal":"read-only"},
+  "uplinkItem": {"type":"item","streamId":"7","value":{"type":"write","sequence":1,"data":"ls\r"}},
+  "uplinkEnd": {"type":"end","streamId":"7"},
+  "jobRegistered": {"type":"job/registered","seq":40,"time":1760000000000,"data":{"jobId":"bash-0123456789abcdef","owner":"s","kind":"bash","label":"npm test","startedAt":1760000000000,"toolCall":{"callId":"c1","rootCallId":"c1"}}},
+  "jobSettled": {"type":"job/settled","seq":41,"time":1760000005000,"data":{"jobId":"bash-0123456789abcdef","owner":"s","kind":"bash","label":"npm test","startedAt":1760000000000,"finishedAt":1760000005000,"status":"completed","cause":"producer","producerReported":true}},
+  "workspaceReplace": {"type":"replace","value":{"items":[],"archivedSessionIds":["gone"],"pinnedSessionIds":["kept"]}}
+}

@@ -44,6 +44,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
     var installOpen by remember(host) { mutableStateOf(false) }
     var operationOpen by remember(host) { mutableStateOf(false) }
     var installedVersion by remember(host) { mutableStateOf<String?>(null) }
+    var replacing by remember(host) { mutableStateOf<String?>(null) }
     var inspection by remember(host) { mutableStateOf<PluginInspection?>(null) }
     var confirm by remember(host) { mutableStateOf<PluginInstallSubject?>(null) }
     var remove by remember(host) { mutableStateOf<PluginBundle?>(null) }
@@ -119,7 +120,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
     FeaturePage(stringResource(R.string.settings_plugins), onClose, onRefresh = { if (!busy) revision++ }) {
         FeatureField(search, { search = it }, R.string.plugins_search_hint, singleLine = true)
         FeatureAction(stringResource(R.string.harness_install_update), !busy, DsButtonVariant.Primary) {
-            spec = ""; registry = ""; inspection = null; installedVersion = null; installOpen = true
+            spec = ""; registry = ""; inspection = null; installedVersion = null; replacing = null; installOpen = true
         }
         if (presets?.presets?.any { it.id == "cordis" && it.broken == null } == true) {
             FeatureAction(stringResource(if (loading) R.string.common_loading else R.string.harness_create_plugin), !busy) { run {
@@ -172,7 +173,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
                  if (bundle.availability != "installation" && (bundle.installed || bundle.installTarget != null)) FeatureAction(stringResource(if (bundle.availability == "missing") R.string.harness_install_update else R.string.ux_a_update), !busy) {
                     val catalog = bundle.catalogInstall(enabled = bundle.enabled)
                     if (catalog != null) confirm = catalog
-                    else { spec = bundle.source ?: bundle.name; registry = ""; inspection = null; installedVersion = bundle.version; installOpen = true }
+                    else { spec = bundle.source ?: bundle.name; registry = ""; inspection = null; installedVersion = bundle.version; replacing = bundle.name.takeIf { bundle.installed }; installOpen = true }
                 }
                 if (bundle.removable && bundle.readOnlyReason == null) FeatureAction(stringResource(R.string.common_remove), !busy) { remove = bundle }
             } }
@@ -195,7 +196,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
             FeatureDiagnostics(listOfNotNull(inspected.status, inspected.problem, inspected.reason).joinToString("\n"))
         } }
         FeatureAction(stringResource(R.string.harness_install_update), !busy && spec.isNotBlank(), DsButtonVariant.Primary) {
-            confirm = PluginInstallSubject(spec.trim(), registry.trim().ifBlank { null })
+            confirm = PluginInstallSubject(spec.trim(), registry.trim().ifBlank { null }, replaces = replacing)
         }
         if (loading) FeatureProgress()
         Failure()
@@ -209,7 +210,7 @@ internal fun PluginManagerScreen(onClose: () -> Unit, onDraftOpened: () -> Unit 
         }
         FeatureAction(stringResource(if (subject.approvedBuilds == null) R.string.harness_install_update else R.string.ux_a_approve_retry), variant = DsButtonVariant.Primary) {
             confirm = null; installOpen = false; operationOpen = true
-            if (host != null) store.pluginOperations.install(host, subject.target, subject.registry, subject.approvedBuilds, subject.enabled, subject.saveExact)
+            if (host != null) store.pluginOperations.install(host, subject.target, subject.registry, subject.approvedBuilds, subject.enabled, subject.saveExact, subject.replaces)
         }
         FeatureAction(stringResource(R.string.common_cancel)) { confirm = null }
     } }

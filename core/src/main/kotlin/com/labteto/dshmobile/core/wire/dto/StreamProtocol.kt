@@ -79,6 +79,26 @@ sealed class RemoteStreamClientMessage {
         @SerialName("type") override val type: String = "cancel",
         @SerialName("streamId") val streamId: String,
     ) : RemoteStreamClientMessage()
+
+    /**
+     * One uplink item on a duplex stream (harness 0.2.1-alpha.3, `terminal/attach`). Items sent
+     * after `open` wait in the host's per-stream inbox, which is bounded: overflowing it fails the
+     * stream with `gateway/uplink-overflow`, so a sender has to budget against the window the
+     * endpoint reports.
+     */
+    @Serializable
+    data class Item(
+        @SerialName("type") override val type: String = "item",
+        @SerialName("streamId") val streamId: String,
+        @SerialName("value") val value: JsonElement,
+    ) : RemoteStreamClientMessage()
+
+    /** Half-close the uplink. The downlink stays open until the host ends it. */
+    @Serializable
+    data class End(
+        @SerialName("type") override val type: String = "end",
+        @SerialName("streamId") val streamId: String,
+    ) : RemoteStreamClientMessage()
 }
 
 /** Encodes [RemoteStreamClientMessage] to its flat wire object. */
@@ -93,6 +113,10 @@ object RemoteStreamClientMessageSerializer : KSerializer<RemoteStreamClientMessa
                 encodeToJsonElement(RemoteStreamClientMessage.Open.serializer(), value)
             is RemoteStreamClientMessage.Cancel ->
                 encodeToJsonElement(RemoteStreamClientMessage.Cancel.serializer(), value)
+            is RemoteStreamClientMessage.Item ->
+                encodeToJsonElement(RemoteStreamClientMessage.Item.serializer(), value)
+            is RemoteStreamClientMessage.End ->
+                encodeToJsonElement(RemoteStreamClientMessage.End.serializer(), value)
         }
         (encoder as JsonEncoder).encodeJsonElement(json)
     }
@@ -102,6 +126,8 @@ object RemoteStreamClientMessageSerializer : KSerializer<RemoteStreamClientMessa
         return when (val type = json["type"]?.jsonPrimitive?.contentOrNull ?: "") {
             "open" -> decodeFromJsonElement(RemoteStreamClientMessage.Open.serializer(), json)
             "cancel" -> decodeFromJsonElement(RemoteStreamClientMessage.Cancel.serializer(), json)
+            "item" -> decodeFromJsonElement(RemoteStreamClientMessage.Item.serializer(), json)
+            "end" -> decodeFromJsonElement(RemoteStreamClientMessage.End.serializer(), json)
             else -> throw IllegalArgumentException("unknown remote-stream client message \"$type\"")
         }
     }

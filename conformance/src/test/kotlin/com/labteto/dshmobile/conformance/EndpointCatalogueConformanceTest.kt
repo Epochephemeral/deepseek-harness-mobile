@@ -218,8 +218,8 @@ class EndpointCatalogueConformanceTest {
             ),
         )
         check("terminal/create", client.api.terminalCreate(sessionId, TerminalCreateRequest(id = missing, cols = 80, rows = 24)))
-        check("terminal/write", client.api.terminalWrite(sessionId, missing, missing, "x"))
-        check("terminal/resize", client.api.terminalResize(sessionId, missing, missing, 80, 24))
+        // Input and resize ride the `terminal/attach` uplink from 0.2.1-alpha.3; see
+        // TerminalAttachConformanceTest, which types into a real terminal.
         check("terminal/rename", client.api.terminalRename(sessionId, missing, "t"))
         check("terminal/close", client.api.terminalClose(sessionId, missing))
 
@@ -277,6 +277,7 @@ class EndpointCatalogueConformanceTest {
             "workspace/follow",
             JsonObject(emptyMap()),
         )
+        checkStream("terminal/attach", client.api.terminalAttachArgs(sessionId, missing))
 
         assertEquals(
             "the harness did not understand these calls:\n" + failures.joinToString("\n"),

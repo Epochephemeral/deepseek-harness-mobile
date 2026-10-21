@@ -4,12 +4,13 @@ import com.labteto.dshmobile.R
 import com.labteto.dshmobile.data.PluginOperationState
 
 /** Immutable confirmation: approval scripts and registry can never come from the editable form. */
+/** [replaces] names the installed bundle an update supersedes, for hosts that will not install over it. */
 internal data class PluginInstallSubject(val target: String, val registry: String?, val approvedBuilds: List<String>? = null,
-    val enabled: Boolean = false, val saveExact: Boolean? = null)
+    val enabled: Boolean = false, val saveExact: Boolean? = null, val replaces: String? = null)
 
 internal fun com.labteto.dshmobile.core.wire.dto.PluginBundle.catalogInstall(enabled: Boolean): PluginInstallSubject? =
     installTarget?.let { PluginInstallSubject(it.spec, null, enabled = enabled,
-        saveExact = true.takeUnless { _ -> it.spec.startsWith("link:") }) }
+        saveExact = true.takeUnless { _ -> it.spec.startsWith("link:") }, replaces = name.takeIf { installed }) }
 internal fun PluginOperationState.approvalSubject(): PluginInstallSubject? =
     subject?.takeIf { it.isNotBlank() }?.let { target ->
         result?.pendingBuilds?.takeIf { it.isNotEmpty() }?.let { PluginInstallSubject(target, registry, it.toList(), enabled, saveExact) }

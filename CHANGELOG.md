@@ -3,10 +3,27 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
-## [Unreleased]
+## [0.17.0] - 2026-10-21
+
+Moves to DeepSeek Harness 0.2.1-rc.2, adds motion across the app, and makes connecting, reading
+long runs and following subagents easier.
 
 ### Added
 
+- **One-step connect.** Paste the link `dsh web` prints into the address field, or tap the new
+  Paste button, and the app connects and signs in with the token in that link. The whole
+  `dsh web: http://…` line works too.
+- **Try again** on a failed connection. Progress and failure messages now scroll into view
+  instead of turning up below the fold.
+- **Jump to latest.** Scroll up during a long run and a button appears that takes you back to the
+  newest message, with a count of what arrived while you were reading. Sending a message also
+  takes you to the end.
+- **Starter prompts** on a new session's empty page. Tapping one fills the composer and does not
+  send it.
+- **Copy session ID** in the session menu, as in the web client.
+- While a turn runs, the top bar says "Working" instead of showing an unlabeled dot.
+- **Changed files.** At the end of a turn that wrote or edited files, a card lists them. Tap a file
+  to open it in the workspace preview. It shows up in both Chat and Trajectory.
 - A history button beside the model chip lists the messages you sent in this session, with each
   one's time, a search field once the list is long, and a marker for prompts that carried an image.
   Picking one jumps the transcript to it, with the prompt at the top of the screen and its reply
@@ -14,8 +31,47 @@ All notable changes to DSH Mobile are documented here. Format based on
   the foot of the sheet pages it in. Replies are not listed: the harness records a turn as many
   assistant steps, so the few hundred of them would bury the prompts you were looking for.
 
+### Changed
+
+- Target DeepSeek Harness 0.2.1-rc.2.
+- The terminal uses rc.2's two-way `terminal/attach` stream. Keystrokes and resizes go up the
+  same stream the screen comes down on, and the harness numbers and acknowledges each one. Hosts
+  before 0.2.1-alpha.3 keep the previous terminal.
+- Screen changes, docks, approval and question cards, the connection banner, the `/` menu, tool
+  rows and message actions animate in and out. Segmented controls slide their selection, the send
+  button lights up once there is something to send, the stop button slides in beside it, and
+  toasts drop in below the status bar.
+- The Details panel follows your finger, closes with the system back gesture and sizes itself to
+  the phone. Its close button is now on the outer edge.
+- Back closes the chat list instead of leaving the app, and the list leaves a strip of the chat
+  showing that you can tap to close it.
+- The approval buttons, the permission chip, message actions and Scan network have bigger touch
+  targets.
+- Archiving from Details and clearing a goal ask for confirmation first.
+- On a host with hot reload, updating a plugin removes the old version and then installs the new
+  one, as the web client does. Such a host refuses to install over the old version.
+- The todo and queue docks stay open while their contents change, and queue placements are
+  translated.
+- The model chip can use the whole width of the top bar.
+- The address field uses an address keyboard without autocorrect, the Go key connects, and
+  Connect stays disabled until there is an address.
+- The reconnecting banner is amber with a spinner. A connection error is red and has its own
+  Retry button.
+- Trajectory folds the harness's injected context into one "Context" row, as Chat does, and drops
+  the `step/start` and `step/end` rows around every tool call. The raw event log is still there,
+  collapsed under "Raw" at the end.
+- A subagent's follow-up controls are a Next turn / Steering switch and a Workspace button,
+  instead of three plain text buttons.
+
 ### Fixed
 
+- On rc.2 hosts, every background job added two raw JSON rows to the transcript.
+- The composer sometimes kept the text of a message it had just sent, if the keyboard was still
+  composing a word.
+- "1 turns" and "1 steps" in the stats line and the Trajectory tab.
+- Trajectory only showed the turns Chat had already loaded. It now has a "Load older messages" row.
+- A reply that had just finished faded out and back in. While a reply streamed, the rows above it
+  could slide over its text for a moment on each new line.
 - The transcript now keeps up with a reply that adds rows. A tool card, the next message segment,
   a question card or the turn's final message used to land just below the bottom edge and stay
   there until you dragged it into view. If you scroll up to read, the view stays where you left

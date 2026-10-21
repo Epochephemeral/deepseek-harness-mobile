@@ -12,7 +12,7 @@ class Harness021Alpha2ContractTest {
     private val fixture = WireJson.parseToJsonElement(javaClass.getResource("/protocol/d743267.json")!!.readText()).jsonObject
 
     @Test fun `migration hints have no usable sequence and legacy baselines still decode`() {
-        assertEquals(DshCore.PROTOCOL_COMMIT, fixture.getValue("upstreamCommit").jsonPrimitive.content)
+        assertEquals("d743267388641bc76f17c45ce8b4c231aed1d32c", fixture.getValue("upstreamCommit").jsonPrimitive.content)
         val migration = WireJson.decodeFromJsonElement<SessionProjectionsValue>(fixture.getValue("migration"))
         assertTrue(migration.requiresMigration)
         assertNull(migration.asOfSeq)

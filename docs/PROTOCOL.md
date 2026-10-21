@@ -4,10 +4,35 @@ What DSH Mobile speaks, in one page. Authoritative shapes live in the harness
 repository — `packages/api/*/src/types.ts`,
 `packages/api/gateway/src/stream-protocol.ts`, `packages/llm/llm/src/assistant-stream.ts`
 and `packages/client/file-upload/src/*` — and this document records the
-subset the app implements, against harness **0.2.1-alpha.2**. New management and
+subset the app implements, against harness **0.2.1-rc.2**. New management and
 question surfaces are additive. Where 0.1.7 changed a shape the app still reads the
 0.1.6 one too; [0.12.0 contract additions](#0120-contract-additions-harness-017)
 lists both.
+
+## 0.17.0 contract changes (harness 0.2.1-rc.2)
+
+Pinned source commit: `687f282e8625c6b8d11ff58211a90524be2e4317`.
+
+- The terminal is one duplex stream. `terminal/attach` takes `{agentId, id}` and replaces
+  `terminal/follow`, `terminal/write` and `terminal/resize`, which rc.2 no longer serves.
+  The downlink carries `snapshot` (with `writable` and an optional
+  `inputWindow{maxBytes,frameOverheadBytes}`), `output`, `state` (with `writable`) and
+  `ack{sequence, refusal?}`. Input and resizes go up the same stream as mux `item`
+  messages, `{type:"write",sequence,data}` and `{type:"resize",sequence,cols,rows}`,
+  numbered from 1 per attachment. Encoded frames in flight stay within the snapshot's
+  window and `maxBufferedBytes`, or the host fails the stream with
+  `gateway/uplink-overflow`. Acks arrive in order and release that room.
+  `TerminalInputLedger` keeps this bookkeeping. A host without `terminal/attach` gets
+  the older follow-and-call terminal.
+- The mux client sends `{type:"item",streamId,value}` and `{type:"end",streamId}` as well as
+  `open` and `cancel`. Only the terminal writes into a stream.
+- `job/registered` and `job/settled` are logged for every background job. The fold drops
+  them; the tool card and the Details jobs list already show both facts.
+- `workspace/follow` may send `{type:"replace",value:WorkspaceBaseline}` mid-generation.
+  The app applies it as a fresh baseline.
+- With hot reload, `pluginManager/installBundle` refuses a package that is already
+  installed (`already-installed`). An update removes the old bundle and installs the new
+  one, keeping the requested enabled state, as the web client does.
 
 ## 0.16.0 contract additions (harness 0.2.1-alpha.2)
 
@@ -668,9 +693,11 @@ the phone's own /24.
   `read` is line-paged; bytes use base64. Versions invalidate cached previews. The
   Android text preview retains at most 4 Mi characters per tab and binary reads at
   most the host cap or 32 MiB. Oversized pages report an error rather than truncating.
-- `terminal/environment|shells|create|follow|write|resize|rename|close` use `agentId`;
-  `terminal/list` uses `sessionId`. Controller writes/resizes include `attachmentId`.
-  Every follow begins with a complete snapshot, then monotonically sequenced output.
+- `terminal/environment|shells|create|attach|rename|close` use `agentId`;
+  `terminal/list` uses `sessionId`. Before 0.2.1-alpha.3, `terminal/follow|write|resize`
+  took the same `agentId` plus an `attachmentId`, and the controller was named on
+  `WebTerminalInfo.controllerId`.
+  Every attachment begins with a complete snapshot, then monotonically sequenced output.
   Authentication and RPC stay in Kotlin. Bundled xterm receives rendering data and
   emits only input, resize, and readiness messages through its local bridge.
 - `messageFeedback/list|put|delete` take `{request:...}` and return a nested business

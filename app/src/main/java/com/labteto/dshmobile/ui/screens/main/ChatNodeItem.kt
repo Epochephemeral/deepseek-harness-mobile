@@ -34,6 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
@@ -220,7 +223,12 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
         // structural ones are not "unknown", they are bookkeeping, and printing `step/start` /
         // `step/end` between every tool call buried the actual work in noise.
         is OtherNode -> if (node.type !in STRUCTURAL_EVENT_TYPES) {
-            if (node.type == "deliverables/presented") {
+            // The turn's settled file changes, listed the way the web client lists them. A payload
+            // this build cannot read falls through to the raw disclosure like any other event.
+            val changesTurn = if (node.type == "workspace/changes") changesTurn(node.data) else null
+            if (changesTurn != null) {
+                ChangedFilesRow(context.nodes, changesTurn, context.cwd)
+            } else if (node.type == "deliverables/presented") {
                 val open = com.labteto.dshmobile.ui.components.LocalFileOpener.current
                 ((node.data as? JsonObject)?.get("files") as? JsonArray)?.forEach { file ->
                     val obj = file as? JsonObject
@@ -355,8 +363,8 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
         }
         AnimatedVisibility(
             visible = actionsVisible && !streaming,
-            enter = fadeIn(DsAnimations.fade),
-            exit = fadeOut(DsAnimations.fade),
+            enter = fadeIn(DsAnimations.fade) + expandVertically(DsAnimations.expand),
+            exit = fadeOut(DsAnimations.fade) + shrinkVertically(DsAnimations.expand),
         ) {
             MessageActionsRow(node, context)
         }
@@ -371,13 +379,14 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
 private fun MessageActionsRow(node: AssistantMessageNode, context: ChatNodeContext) {
     val colors = DsTheme.colors
     val clipboard = LocalClipboardManager.current
+    val haptics = com.labteto.dshmobile.ui.components.rememberDsHaptics()
     Row(
-        modifier = Modifier.padding(top = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ActionIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_message)) {
             clipboard.setText(AnnotatedString(node.plainText))
+            haptics.confirm()
         }
         ActionIcon(Icons.AutoMirrored.Outlined.CallSplit, stringResource(R.string.chat_branch_message)) {
             context.onBranchFrom(node.seq)
@@ -397,14 +406,14 @@ private fun ActionIcon(
     label: String,
     onClick: () -> Unit,
 ) {
-    Icon(
-        icon,
+    // A full touch target around an 18dp glyph. The 28dp icons with 4dp between them were close
+    // enough that copy and branch were easy to swap by accident.
+    com.labteto.dshmobile.ui.components.DsIconButton(
+        icon = icon,
         contentDescription = label,
+        onClick = onClick,
         tint = DsTheme.colors.labelTertiary,
-        modifier = Modifier
-            .size(28.dp)
-            .clickable(onClick = onClick)
-            .padding(6.dp),
+        iconSize = 18.dp,
     )
 }
 
@@ -466,11 +475,16 @@ internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: 
                 if (expanded && elapsed != null) Text(elapsed, style = DsType.caption11, color = colors.labelCaption)
                 Text(when (state) { DisclosureState.Error -> "!"; DisclosureState.Running -> "…"; else -> "✓" },
                     style = DsType.caption11, color = if (state == DisclosureState.Error) colors.error else colors.labelTertiary)
-                Icon(FeatherIcons.ChevronRight, null, Modifier.size(14.dp).graphicsLayer { rotationZ = if (expanded) 90f else 0f }, tint = colors.labelTertiary)
+                val chevron by animateFloatAsState(if (expanded) 90f else 0f, DsAnimations.chevron, label = "toolChevron")
+                Icon(FeatherIcons.ChevronRight, null, Modifier.size(14.dp).graphicsLayer { rotationZ = chevron }, tint = colors.labelTertiary)
             }
         }) else null,
     )
-    if (expanded) {
+    AnimatedVisibility(
+        visible = expanded,
+        enter = fadeIn(DsAnimations.fade) + expandVertically(DsAnimations.expand),
+        exit = fadeOut(DsAnimations.fade) + shrinkVertically(DsAnimations.expand),
+    ) { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         // What the call returned, not the file as it is now: the durable attachment survives the
         // file changing or being deleted, and shares the transcript's decoded-image cache.
         val images = remember(result?.content) { toolResultImages(result?.content) }
@@ -485,7 +499,7 @@ internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: 
         result?.content?.let { JsonDisclosure(stringResource(R.string.chat_output_placeholder), it) }
         result?.meta?.let { JsonDisclosure(node.name, it) }
         PtcChildren(node.callId, context.nodes.filterIsInstance<OtherNode>())
-    }
+    } }
     if (result?.isError == true) {
         // The dot is colour-only, so the word stays — but without a second dot beside it.
         //

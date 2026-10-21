@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_jump_latest">Aller au plus récent</string>
+    <string name="chat_suggest_overview">Donne-moi une vue d’ensemble de ce projet</string>
+    <string name="chat_suggest_tests">Lance les tests et corrige ce qui échoue</string>
+    <string name="chat_suggest_changes">Relis mes modifications non validées</string>
+    <string name="chat_queue_placement_queued">Tour suivant</string>
+    <string name="chat_queue_placement_steering">Orientation</string>
+    <string name="chat_queue_placement_context">Contexte</string>
+    <string name="chat_status_running">En cours</string>
+    <string name="chat_status_idle">Inactif</string>
+    <string name="chatlist_session_copy_id">Copier l’ID de session</string>
+    <string name="connect_paste">Coller</string>
+    <string name="connect_try_again">Réessayer</string>
+    <string name="connect_manual_paste_hint">Collez le lien affiché par dsh web, jeton compris, et vous serez aussi connecté.</string>
+    <plurals name="chat_jump_latest_new">
+        <item quantity="one">%d nouveau</item>
+        <item quantity="many">%d nouveaux</item>
+        <item quantity="other">%d nouveaux</item>
+    </plurals>
+    <plurals name="trajectory_step_count">
+        <item quantity="one">%d étape</item>
+        <item quantity="many">%d étapes</item>
+        <item quantity="other">%d étapes</item>
+    </plurals>
+    <plurals name="chat_stats_turn_count">
+        <item quantity="one">%d tour</item>
+        <item quantity="many">%d tours</item>
+        <item quantity="other">%d tours</item>
+    </plurals>
+    <plurals name="chat_changed_files">
+        <item quantity="one">%d fichier modifié</item>
+        <item quantity="many">%d fichiers modifiés</item>
+        <item quantity="other">%d fichiers modifiés</item>
+    </plurals>
+</resources>

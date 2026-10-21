@@ -16,6 +16,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.labteto.dshmobile.ui.theme.DsAnimations
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -27,7 +33,7 @@ import com.labteto.dshmobile.ui.theme.DsType
 import com.labteto.dshmobile.ui.theme.DshTheme
 
 /**
- * Centered empty state: whale mark, hero headline, optional subtitle, a mono
+ * Centered empty state: whale mark, hero headline, optional subtitle, an optional mono
  * "Preview" pill, and suggestion chips.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -37,11 +43,20 @@ fun EmptyHero(
     subtitle: String?,
     chips: List<String> = emptyList(),
     onChipClick: (String) -> Unit = {},
-    showPreview: Boolean = true,
+    showPreview: Boolean = false,
 ) {
     val colors = DsTheme.colors
+    // A short fade-and-rise on arrival, so an empty screen settles instead of appearing in a frame.
+    val arrival = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { arrival.animateTo(1f, tween(360, easing = DsAnimations.emphasizedDecelerate)) }
     Column(
-        modifier = Modifier.fillMaxWidth().padding(32.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = arrival.value
+                translationY = (1f - arrival.value) * 12.dp.toPx()
+            }
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -72,7 +87,9 @@ fun EmptyHero(
         if (chips.isNotEmpty()) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                // Centred under the centred headline; left-aligned chips under it read as a list
+                // that had drifted off the page.
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 chips.forEach { chip ->

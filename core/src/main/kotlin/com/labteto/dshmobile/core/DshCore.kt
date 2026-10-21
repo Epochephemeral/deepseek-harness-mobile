@@ -24,7 +24,11 @@ object DshCore {
      * 0.2.0 moved the baseline without changing anything this client sends or reads. Hosts on
      * 0.1.7-rc.x and 0.1.6 still work as they did with client 0.12.0.
      * 0.2.1 adds automation/plugin management and call-keyed timed questions.
+     *
+     * 0.2.1-rc.2 is the first baseline this client *writes into* a stream: the terminal moved from
+     * `terminal/write` and `terminal/resize` calls onto the uplink of one `terminal/attach` stream.
+     * Hosts before 0.2.1-alpha.3 still get the follow-and-call terminal.
      */
-    const val PROTOCOL_BASELINE = "0.2.1-alpha.2"
-    const val PROTOCOL_COMMIT = "d743267388641bc76f17c45ce8b4c231aed1d32c"
+    const val PROTOCOL_BASELINE = "0.2.1-rc.2"
+    const val PROTOCOL_COMMIT = "687f282e8625c6b8d11ff58211a90524be2e4317"
 }

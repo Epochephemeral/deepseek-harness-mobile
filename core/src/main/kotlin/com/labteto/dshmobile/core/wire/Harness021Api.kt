@@ -44,6 +44,30 @@ suspend fun DshApiClient.inspectPlugin(spec: String, registry: String? = null): 
     })
 suspend fun DshApiClient.installPlugin(spec: String, options: PluginInstallOptions): RpcResult<PluginChangeResult> =
     featureCall("pluginManager/installBundle", named("spec" to str(spec), "options" to WireJson.encodeToJsonElement(PluginInstallOptions.serializer(), options)))
+/**
+ * Install [spec], replacing the installed bundle [replaces] when the host will not install over it.
+ *
+ * Harness 0.2.1-alpha.3 with hot reload refuses to install a package that is already installed
+ * (`already-installed`): plugins are stopped by removing the package, so an update is remove and
+ * then install. That is what its own plugin manager does for "Update", and what this does when the
+ * refusal comes back. A host without hot reload installs over the old version and never refuses,
+ * so nothing is removed there. A removal the host defers to the next restart (`stop-profile`) still
+ * lets the install go ahead, as the web client does.
+ */
+suspend fun DshApiClient.installOrReplacePlugin(
+    spec: String,
+    options: PluginInstallOptions,
+    replaces: String?,
+): RpcResult<PluginChangeResult> {
+    val first = installPlugin(spec, options)
+    val refused = (first as? RpcResult.Ok)?.value?.error?.code == "already-installed"
+    if (!refused || replaces == null) return first
+    val removed = removePluginBundle(replaces)
+    if (removed !is RpcResult.Ok) return removed
+    val removeError = removed.value.error?.code
+    if (removeError != null && removeError != "stop-profile") return removed
+    return installPlugin(spec, options)
+}
 suspend fun DshApiClient.waitForPluginInstall(requestId: String): RpcResult<PluginChangeResult?> =
     featureCall("pluginManager/waitForInstall", named("requestId" to str(requestId)))
 suspend fun DshApiClient.cancelPluginInstall(requestId: String): RpcResult<PluginInstallCancellation> =
