@@ -52,6 +52,8 @@ The [project site](https://dshm.zyphite.com) has a one-page overview, and the
 
 - Chat with the agent. Replies stream in with their reasoning, code blocks and tool calls. You
   can attach photos and files, reference files with `@`, and run commands and skills with `/`.
+- Press and hold a message, a tool call or a file to see what else you can do with it. Copy
+  it, fix a message you sent and send it again, or mention a file in your next message.
 - Answer what the agent needs from you: approve or reject a command, answer its questions, and
   review a plan before it starts.
 - Keep an eye on long work. Goals, todo lists, queued messages, background jobs and subagents

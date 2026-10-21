@@ -156,6 +156,29 @@ class RewindDecorationTest {
         assertEquals("", ctx.text)
     }
 
+    /**
+     * Holding a bubble has already picked the message, so the flow skips the candidate list: the
+     * first thing sent is the impact preview, and the rewind still refills the composer in full.
+     */
+    @Test
+    fun `a held message opens at the mode step and rewinds to that message`() = runTest {
+        val ctx = host()
+        val loading = RewindDecoration.fromMessage(ctx, 20, fullText)
+        // The title folds and cuts the message the way the plugin's candidate preview does.
+        assertEquals(res(R.string.rewind_to, fullText.replace("\n", " ").take(80).ui()), loading.title)
+        val step = loading.load?.invoke() ?: error("the mode step loads the impact preview")
+        assertEquals(listOf("chat", "both"), step.options.map { it.id })
+        assertNull(step.onSelect(step.option("chat")))
+        assertEquals(listOf("/rewind preview @20 both", "/rewind @20 chat"), ctx.sent)
+        assertEquals(fullText, ctx.text)
+    }
+
+    @Test
+    fun `a held message with no text still names itself`() {
+        val step = RewindDecoration.fromMessage(host(), 20, "  ")
+        assertEquals(res(R.string.rewind_to, res(R.string.rewind_no_text)), step.title)
+    }
+
     @Test
     fun `candidate parsing matches the plugin's`() {
         assertEquals(

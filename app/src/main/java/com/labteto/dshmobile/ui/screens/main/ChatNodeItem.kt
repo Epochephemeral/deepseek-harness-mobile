@@ -18,7 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.CallSplit
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.Description
@@ -38,10 +42,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.expandVertically
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.labteto.dshmobile.R
@@ -69,7 +71,11 @@ import com.labteto.dshmobile.ui.components.DisclosureRow
 import com.labteto.dshmobile.ui.components.DisclosureState
 import com.labteto.dshmobile.ui.components.DsPill
 import com.labteto.dshmobile.ui.components.FeatherIcons
+import com.labteto.dshmobile.ui.components.HoldAction
+import com.labteto.dshmobile.ui.components.HoldMenu
 import com.labteto.dshmobile.ui.components.MarkdownText
+import com.labteto.dshmobile.ui.components.SelectTextDialog
+import com.labteto.dshmobile.ui.components.clickableWithHold
 import com.labteto.dshmobile.ui.components.StateDot
 import com.labteto.dshmobile.ui.components.StateDotState
 import com.labteto.dshmobile.ui.components.ThinkingPanel
@@ -97,6 +103,15 @@ internal data class ChatNodeContext(
     val onBranchFrom: (Long) -> Unit,
     val onFeedback: (Long, Boolean) -> Unit,
     val eventTimes: Map<Long, Long> = emptyMap(),
+    /** Puts a sent prompt's text back in the composer; null where there is no composer. */
+    val onEditPrompt: ((String) -> Unit)? = null,
+    /**
+     * Rewinds the session to a user message, by sequence and preview. Null unless the rewind
+     * plugin is installed and the session is idle.
+     */
+    val onRewindTo: ((Long, String) -> Unit)? = null,
+    /** Adds an `@` mention of a workspace path to the composer; null where there is no composer. */
+    val onMention: ((path: String, folder: Boolean) -> Unit)? = null,
 )
 
 /**
@@ -139,7 +154,7 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
                 when {
                     node.isRewindMarker -> RewindMarkerRow()
                     node.isInjectedContext -> InjectedContextRow(node, text)
-                    else -> UserBubble(text)
+                    else -> UserMessageBubble(node, text, context)
                 }
             }
         }
@@ -227,7 +242,7 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
             // this build cannot read falls through to the raw disclosure like any other event.
             val changesTurn = if (node.type == "workspace/changes") changesTurn(node.data) else null
             if (changesTurn != null) {
-                ChangedFilesRow(context.nodes, changesTurn, context.cwd)
+                ChangedFilesRow(context.nodes, changesTurn, context.cwd, context.onMention)
             } else if (node.type == "deliverables/presented") {
                 val open = com.labteto.dshmobile.ui.components.LocalFileOpener.current
                 ((node.data as? JsonObject)?.get("files") as? JsonArray)?.forEach { file ->
@@ -298,6 +313,56 @@ internal fun FileChip(name: String, bytes: Long, modifier: Modifier = Modifier) 
             Text(fileSizeText(bytes), style = DsType.caption11, color = colors.labelTertiary)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// User messages
+// ---------------------------------------------------------------------------
+
+/**
+ * The reader's own message, and what holding it offers.
+ *
+ * Copying it back is the point (issue #60): a prompt sent with a mistake in it, then stopped, used
+ * to be stuck in the transcript, and retyping it on a phone keyboard was the only way to fix it.
+ * "Edit as new message" goes one step further and puts it straight in the composer; the rewind,
+ * when the plugin is there, withdraws it too, so the corrected one replaces it instead of following.
+ */
+@Composable
+private fun UserMessageBubble(node: UserMessageNode, text: String, context: ChatNodeContext) {
+    var menuOpen by remember(node.seq) { mutableStateOf(false) }
+    var selecting by remember(node.seq) { mutableStateOf(false) }
+    val copy = com.labteto.dshmobile.ui.components.rememberCopier()
+    UserBubble(
+        text = text,
+        onHold = { menuOpen = true },
+        holdLabel = stringResource(R.string.hold_message_actions),
+    )
+    if (menuOpen) {
+        val actions = buildList {
+            add(HoldAction(stringResource(R.string.common_copy), Icons.Outlined.ContentCopy) { copy(text) })
+            add(HoldAction(stringResource(R.string.hold_select_text), Icons.Outlined.TextFields) { selecting = true })
+            context.onEditPrompt?.let { edit ->
+                add(
+                    HoldAction(
+                        stringResource(R.string.hold_edit_as_new),
+                        Icons.Outlined.Edit,
+                        detail = stringResource(R.string.hold_edit_as_new_detail),
+                    ) { edit(text) },
+                )
+            }
+            context.onRewindTo?.let { rewind ->
+                add(
+                    HoldAction(
+                        stringResource(R.string.hold_rewind_here),
+                        Icons.AutoMirrored.Outlined.Undo,
+                        detail = stringResource(R.string.hold_rewind_here_detail),
+                    ) { rewind(node.seq, node.previewText) },
+                )
+            }
+        }
+        HoldMenu(onDismiss = { menuOpen = false }, actions = actions, preview = text)
+    }
+    if (selecting) SelectTextDialog(text) { selecting = false }
 }
 
 // ---------------------------------------------------------------------------
@@ -377,16 +442,13 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
  */
 @Composable
 private fun MessageActionsRow(node: AssistantMessageNode, context: ChatNodeContext) {
-    val colors = DsTheme.colors
-    val clipboard = LocalClipboardManager.current
-    val haptics = com.labteto.dshmobile.ui.components.rememberDsHaptics()
+    val copy = com.labteto.dshmobile.ui.components.rememberCopier()
     Row(
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ActionIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_message)) {
-            clipboard.setText(AnnotatedString(node.plainText))
-            haptics.confirm()
+            copy(node.plainText)
         }
         ActionIcon(Icons.AutoMirrored.Outlined.CallSplit, stringResource(R.string.chat_branch_message)) {
             context.onBranchFrom(node.seq)
@@ -445,6 +507,8 @@ internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: 
         viewTitle = null,
     )
     var expanded by remember(node.callId) { mutableStateOf(false) }
+    var holdOpen by remember(node.callId) { mutableStateOf(false) }
+    val holdLabel = stringResource(R.string.hold_tool_actions)
     // The leading slot carries the outcome: a red dot for a failed call, the tool glyph otherwise.
     val state = when {
         result?.isError == true -> DisclosureState.Error
@@ -465,8 +529,12 @@ internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: 
         summaryOverride = row.summary,
         iconOverride = row.variant.featherIcon(),
         state = state,
+        onHold = { holdOpen = true },
+        holdLabel = holdLabel,
         header = if (compact) ({
-            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable(role = Role.Button) { expanded = !expanded }.padding(vertical = 4.dp),
+            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp)
+                .clickableWithHold(holdLabel, onHold = { holdOpen = true }, role = Role.Button) { expanded = !expanded }
+                .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Icon(if (node.name == "read_image") FeatherIcons.Image else row.variant.featherIcon(), null, Modifier.size(14.dp), tint = colors.labelTertiary)
                 Text(row.title, style = DsType.small13, color = colors.labelSecondary)
@@ -480,6 +548,7 @@ internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: 
             }
         }) else null,
     )
+    if (holdOpen) ToolHoldMenu(node, result, row.filePath, context) { holdOpen = false }
     AnimatedVisibility(
         visible = expanded,
         enter = fadeIn(DsAnimations.fade) + expandVertically(DsAnimations.expand),

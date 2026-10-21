@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -47,7 +51,11 @@ import com.labteto.dshmobile.ui.components.DsDialog
 import com.labteto.dshmobile.ui.components.DsMenu
 import com.labteto.dshmobile.ui.components.DsPill
 import com.labteto.dshmobile.ui.components.FeatherIcons
+import com.labteto.dshmobile.ui.components.HoldAction
+import com.labteto.dshmobile.ui.components.HoldMenu
 import com.labteto.dshmobile.ui.components.MenuItem
+import com.labteto.dshmobile.ui.components.holdable
+import com.labteto.dshmobile.ui.components.rememberCopier
 import com.labteto.dshmobile.ui.components.SectionHeader
 import com.labteto.dshmobile.ui.components.StateDot
 import com.labteto.dshmobile.ui.components.formatDurationMs
@@ -241,6 +249,16 @@ internal fun QueueDock(queue: List<QueueItem>, store: SessionStore, modifier: Mo
     var expanded by rememberSaveable(sessionId) { mutableStateOf(false) }
     var editingId by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
+    // A queued turn is something the reader already sent, so it holds like their bubble does.
+    var heldId by remember { mutableStateOf<String?>(null) }
+    val copy = rememberCopier()
+    val holdLabel = stringResource(R.string.hold_message_actions)
+    fun fullText(item: QueueItem): String =
+        (item.content as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? kotlinx.serialization.json.JsonObject)?.get("text").asString() }
+            ?.joinToString("\n")
+            ?.takeIf { it.isNotBlank() }
+            ?: item.previewText
 
     DisclosureRow(
         title = stringResource(R.string.chat_queue_title),
@@ -259,7 +277,8 @@ internal fun QueueDock(queue: List<QueueItem>, store: SessionStore, modifier: Mo
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 28.dp, top = 2.dp),
+                    .padding(start = 28.dp, top = 2.dp)
+                    .holdable(holdLabel) { heldId = item.id },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -284,7 +303,7 @@ internal fun QueueDock(queue: List<QueueItem>, store: SessionStore, modifier: Mo
                     items = listOf(
                         MenuItem(stringResource(R.string.chat_queue_edit)) {
                             editingId = item.id
-                            editText = (item.content as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonObject)?.get("text").asString() }?.joinToString("\n") ?: item.previewText
+                            editText = fullText(item)
                         },
                         MenuItem(stringResource(R.string.chat_queue_remove), danger = true) {
                             change(item.id, "remove")
@@ -297,6 +316,30 @@ internal fun QueueDock(queue: List<QueueItem>, store: SessionStore, modifier: Mo
             }
         }
         Spacer(Modifier.height(2.dp))
+    }
+
+    // Looked up by id on every pass, so a turn that leaves the queue while its menu is open takes
+    // the menu with it instead of leaving actions aimed at something that is gone.
+    queue.firstOrNull { it.id == heldId }?.let { item ->
+        val text = fullText(item)
+        val changeable = !busy && !blocked && item.placement != "steering"
+        HoldMenu(
+            onDismiss = { heldId = null },
+            preview = text,
+            actions = buildList {
+                add(HoldAction(stringResource(R.string.common_copy), Icons.Outlined.ContentCopy) { copy(text) })
+                if (changeable) {
+                    add(HoldAction(stringResource(R.string.chat_queue_edit), Icons.Outlined.Edit) {
+                        editingId = item.id
+                        editText = text
+                    })
+                    add(HoldAction(stringResource(R.string.chat_queue_steer), Icons.Outlined.Bolt) { change(item.id, "steer") })
+                    add(HoldAction(stringResource(R.string.chat_queue_remove), Icons.Outlined.Delete, danger = true) {
+                        change(item.id, "remove")
+                    })
+                }
+            },
+        )
     }
 
     editingId?.let { id ->

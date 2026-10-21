@@ -17,11 +17,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,6 +35,7 @@ import com.labteto.dshmobile.core.session.ToolCallNode
 import com.labteto.dshmobile.core.session.ToolResultNode
 import com.labteto.dshmobile.ui.components.FeatherIcons
 import com.labteto.dshmobile.ui.components.LocalFileOpener
+import com.labteto.dshmobile.ui.components.clickableWithHold
 import com.labteto.dshmobile.ui.theme.DsShapes
 import com.labteto.dshmobile.ui.theme.DsTheme
 import com.labteto.dshmobile.ui.theme.DsType
@@ -78,11 +83,18 @@ internal fun changesTurn(data: kotlinx.serialization.json.JsonElement): Int? =
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ChangedFilesRow(nodes: List<ChatNode>, turn: Int, cwd: String?) {
+internal fun ChangedFilesRow(
+    nodes: List<ChatNode>,
+    turn: Int,
+    cwd: String?,
+    onMention: ((String, Boolean) -> Unit)? = null,
+) {
     val files = remember(nodes, turn) { changedFiles(nodes, turn) }
     if (files.isEmpty()) return
     val colors = DsTheme.colors
     val open = LocalFileOpener.current
+    var held by remember(turn) { mutableStateOf<String?>(null) }
+    val holdLabel = stringResource(R.string.hold_file_actions)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = DsShapes.block,
@@ -111,7 +123,7 @@ internal fun ChangedFilesRow(nodes: List<ChatNode>, turn: Int, cwd: String?) {
                             .clip(DsShapes.pill)
                             .background(colors.bgModulePlatform)
                             .border(1.dp, colors.borderL3, DsShapes.pill)
-                            .clickable(role = Role.Button) { open(path) }
+                            .clickableWithHold(holdLabel, onHold = { held = path }, role = Role.Button) { open(path) }
                             .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -128,5 +140,14 @@ internal fun ChangedFilesRow(nodes: List<ChatNode>, turn: Int, cwd: String?) {
                 }
             }
         }
+    }
+    held?.let { path ->
+        FileHoldMenu(
+            path = mentionPath(path, cwd),
+            folder = false,
+            onMention = onMention,
+            copyPath = path,
+            onDismiss = { held = null },
+        )
     }
 }

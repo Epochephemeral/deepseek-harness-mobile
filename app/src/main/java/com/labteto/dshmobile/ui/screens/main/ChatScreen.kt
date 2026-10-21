@@ -61,6 +61,7 @@ import com.labteto.dshmobile.ui.screens.main.commands.CommandContext
 import com.labteto.dshmobile.ui.screens.main.commands.CommandDecorations
 import com.labteto.dshmobile.ui.screens.main.commands.CommandUiSpec
 import com.labteto.dshmobile.ui.screens.main.commands.PopupSelectSheet
+import com.labteto.dshmobile.ui.screens.main.commands.RewindDecoration
 import com.labteto.dshmobile.ui.screens.main.commands.SlashMenu
 import com.labteto.dshmobile.ui.screens.main.commands.SlashRow
 import com.labteto.dshmobile.ui.screens.main.commands.activeSlash
@@ -153,6 +154,11 @@ fun ChatScreen(
     }
     // A decorated command's picker (the phone's `popupSelect`), keyed by the command it serves.
     var popup by remember(composer.key) { mutableStateOf<Pair<String, CommandUiSpec.PopupSelect>?>(null) }
+    // A message held and sent to rewind, by sequence and preview: rewind's picker, opened on its pick.
+    var rewindFrom by remember(composer.key) { mutableStateOf<Pair<Long, String>?>(null) }
+    // A held prompt waiting on the reader's say-so before it replaces a draft they had started.
+    var replaceDraftWith by remember(composer.key) { mutableStateOf<String?>(null) }
+    var composerFocusTick by remember { mutableIntStateOf(0) }
 
     // Hoisted above the tab swap so each view keeps its own scroll position across switches.
     val chatListState = rememberLazyListState()
@@ -331,11 +337,34 @@ fun ChatScreen(
         return true
     }
 
-    fun send(text: String) {
+    /**
+     * Put a sent prompt back in the composer to be corrected. An empty draft just takes it; one the
+     * reader has started is asked about first, because replacing it would lose what they typed.
+     */
+    fun editPrompt(text: String) {
+        if (draft.isBlank() || draft == text) {
+            draft = text
+            composer.selection = text.length
+            composerFocusTick++
+        } else {
+            replaceDraftWith = text
+        }
+    }
+
+    /** An `@` mention of a workspace path at the end of the draft, as the reference picker writes one. */
+    fun mention(path: String, folder: Boolean) {
+        val mention = fileMention(path, folder) ?: return
+        val end = composer.text.length
+        composer.insertReference(end, end, mention, path, if (folder) "folder" else "file", path)
+        composerFocusTick++
+    }
+
+    /** [deliveryOverride] is a mode picked for this message alone, from holding send. */
+    fun send(text: String, deliveryOverride: String? = null) {
         if (composer.preparing || composer.submitting) { draft = text; return }
         sentTick++
         if (attachments.isEmpty() && dispatchDecorated(text)) return
-        val delivery = mode
+        val delivery = deliveryOverride ?: mode
         val targetId = composer.key.sessionId
         val targetHost = composer.key.host
         val pending = attachments.toList()
@@ -493,6 +522,20 @@ fun ChatScreen(
                     conversation?.nodes?.filterIsInstance<com.labteto.dshmobile.core.session.AssistantMessageNode>()
                         ?.firstOrNull { it.seq == seq }?.messageId?.let { feedback = Triple(composer.key, it, positive) }
                 },
+                // Lambdas rather than references, for the reason given at the composer's `onSend`:
+                // a reference to a local function compares equal whatever composer it captured.
+                onEditPrompt = if (currentSessionId != null) ({ text -> editPrompt(text) }) else null,
+                // The rewind plugin's own picker refuses nothing while a turn runs, but withdrawing
+                // the message a running turn is answering is not something to offer from a hold.
+                onRewindTo = if (
+                    currentSessionId != null && conversation?.running != true &&
+                    commandsAvailable && RewindDecoration.recognizes(commands)
+                ) {
+                    { seq, preview -> rewindFrom = seq to preview }
+                } else {
+                    null
+                },
+                onMention = if (currentSessionId != null) ({ path, folder -> mention(path, folder) }) else null,
             )
 
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -702,7 +745,9 @@ fun ChatScreen(
                     // open when this screen first composed. A lambda is rebuilt when what it captures
                     // changes and compares by identity, so the composer always holds the current one.
                     onSend = { text -> send(text) },
+                    onSendWith = { text, delivery -> send(text, delivery) },
                     onStop = { scope.launch { store.cancelTurn() } },
+                    focusTick = composerFocusTick,
                 )
 
                 StatsFooter(stats = sessionStats, usage = tokenUsage)
@@ -722,7 +767,42 @@ fun ChatScreen(
             onDismiss = { popup = null },
         )
     }
-    panelKey?.let { key -> WorkspacePanels(store, store.panels.get(key), onDismiss = { panelKey = null }) }
+    rewindFrom?.let { (seq, preview) ->
+        val rewindContext = commandContext(composer.key.sessionId, composer.key.host)
+        PopupSelectSheet(
+            command = "rewind",
+            spec = RewindDecoration.ui as CommandUiSpec.PopupSelect,
+            context = rewindContext,
+            onDismiss = { rewindFrom = null },
+            initialStep = remember(seq) { RewindDecoration.fromMessage(rewindContext, seq, preview) },
+        )
+    }
+    replaceDraftWith?.let { text ->
+        ConfirmDialog(
+            title = stringResource(R.string.hold_replace_draft_title),
+            body = stringResource(R.string.hold_replace_draft_body),
+            confirmLabel = stringResource(R.string.hold_replace_draft_confirm),
+            onDismiss = { replaceDraftWith = null },
+            onConfirm = {
+                replaceDraftWith = null
+                draft = text
+                composer.selection = text.length
+                composerFocusTick++
+            },
+        )
+    }
+    panelKey?.let { key ->
+        WorkspacePanels(
+            store,
+            store.panels.get(key),
+            onDismiss = { panelKey = null },
+            // Mentioning closes the panel: the chip in the composer is where the reader goes next.
+            onMention = { path, folder ->
+                mention(path, folder)
+                panelKey = null
+            },
+        )
+    }
     feedback?.let { (key, id, positive) -> FeedbackDialog(store, key, id, positive) { feedback = null } }
     when (sheet) {
         ChatSheet.Commands -> CommandSheet(
@@ -775,6 +855,7 @@ fun ChatScreen(
                 tab = ChatTab.Chat
             },
             onDismiss = { sheet = null },
+            onEdit = if (currentSessionId != null) ({ text -> editPrompt(text) }) else null,
         )
         ChatSheet.Presets -> PresetsSheet(
             presets = agentPresets,

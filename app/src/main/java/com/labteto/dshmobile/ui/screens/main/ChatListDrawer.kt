@@ -3,10 +3,8 @@ package com.labteto.dshmobile.ui.screens.main
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +27,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.automirrored.outlined.CallSplit
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -60,6 +65,10 @@ import com.labteto.dshmobile.ui.components.DsIconButton
 import com.labteto.dshmobile.ui.components.DsPill
 import com.labteto.dshmobile.ui.components.DsMenu
 import com.labteto.dshmobile.ui.components.EmptyHero
+import com.labteto.dshmobile.ui.components.HoldAction
+import com.labteto.dshmobile.ui.components.HoldMenu
+import com.labteto.dshmobile.ui.components.clickableWithHold
+import com.labteto.dshmobile.ui.components.rememberCopier
 import com.labteto.dshmobile.ui.components.MenuItem
 import com.labteto.dshmobile.ui.components.SectionHeader
 import com.labteto.dshmobile.ui.components.StateDot
@@ -525,7 +534,6 @@ private fun SortChip(byRecency: Boolean, onPick: (byRecency: Boolean) -> Unit) {
  * Rename and remove exist on the wire and had no UI at all; a long-press menu is where a
  * phone user expects to find them.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WorkspaceHeader(
     workspace: WorkspaceRow,
@@ -552,7 +560,11 @@ private fun WorkspaceHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(DsShapes.row)
-                .combinedClickable(onClick = onToggle, onLongClick = { menuOpen = true })
+                .clickableWithHold(
+                    holdLabel = stringResource(R.string.hold_workspace_actions),
+                    onHold = { menuOpen = true },
+                    onClick = onToggle,
+                )
                 .padding(vertical = DsSpacing.xsmall),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -577,19 +589,12 @@ private fun WorkspaceHeader(
         }
         if (menuOpen) {
             WorkspaceMenu(
+                label = label,
+                path = workspace.path,
                 onDismiss = { menuOpen = false },
-                onNewSession = {
-                    menuOpen = false
-                    onNewSession()
-                },
-                onRename = {
-                    menuOpen = false
-                    renaming = true
-                },
-                onDelete = {
-                    menuOpen = false
-                    deleting = true
-                },
+                onNewSession = onNewSession,
+                onRename = { renaming = true },
+                onDelete = { deleting = true },
             )
         }
     }
@@ -621,16 +626,26 @@ private fun WorkspaceHeader(
 
 @Composable
 private fun WorkspaceMenu(
+    label: String,
+    path: String,
     onDismiss: () -> Unit,
     onNewSession: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    DsDialog(title = null, onDismiss = onDismiss) {
-        SheetRow(title = stringResource(R.string.chatlist_workspace_new_session), onClick = onNewSession)
-        SheetRow(title = stringResource(R.string.chatlist_workspace_rename), onClick = onRename)
-        SheetRow(title = stringResource(R.string.chatlist_workspace_delete), onClick = onDelete)
-    }
+    val copy = rememberCopier()
+    HoldMenu(
+        onDismiss = onDismiss,
+        preview = label,
+        actions = buildList {
+            add(HoldAction(stringResource(R.string.chatlist_workspace_new_session), Icons.Outlined.Add, onClick = onNewSession))
+            add(HoldAction(stringResource(R.string.chatlist_workspace_rename), Icons.Outlined.Edit, onClick = onRename))
+            if (path.isNotBlank()) {
+                add(HoldAction(stringResource(R.string.hold_copy_path), Icons.Outlined.ContentCopy) { copy(path) })
+            }
+            add(HoldAction(stringResource(R.string.chatlist_workspace_delete), Icons.Outlined.Delete, danger = true, onClick = onDelete))
+        },
+    )
 }
 
 /**
@@ -641,7 +656,6 @@ private fun WorkspaceMenu(
  * "Subagents" heading per workspace, which said nothing about which run produced which — with a
  * dozen of them from three sessions it was a wall of near-identical rows.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionRowItem(
     session: SessionRow,
@@ -660,7 +674,7 @@ private fun SessionRowItem(
     var menuOpen by remember { mutableStateOf(false) }
     var renameOpen by remember { mutableStateOf(false) }
     var archiveConfirmOpen by remember { mutableStateOf(false) }
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copy = rememberCopier()
     var archiveBusy by remember { mutableStateOf<com.labteto.dshmobile.data.ArchiveOutcome.Busy?>(null) }
     val chevronRotation by animateFloatAsState(
         targetValue = if (childrenExpanded) 90f else 0f,
@@ -675,15 +689,15 @@ private fun SessionRowItem(
                 .padding(start = (depth * 16).dp)
                 .clip(DsShapes.row)
                 .background(if (isCurrent) colors.sidebarNavActive else androidx.compose.ui.graphics.Color.Transparent)
-                .combinedClickable(
-                    onClick = {
-                        // Close first. Waiting for the session to load before the drawer moved made
-                        // every switch feel like a stall; the transcript shows its own skeleton.
-                        onClose()
-                        scope.launch { store.openSession(session.sessionId) }
-                    },
-                    onLongClick = { menuOpen = true },
-                )
+                .clickableWithHold(
+                    holdLabel = stringResource(R.string.hold_session_actions),
+                    onHold = { menuOpen = true },
+                ) {
+                    // Close first. Waiting for the session to load before the drawer moved made
+                    // every switch feel like a stall; the transcript shows its own skeleton.
+                    onClose()
+                    scope.launch { store.openSession(session.sessionId) }
+                }
                 .padding(horizontal = DsSpacing.small, vertical = DsSpacing.xsmall),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -767,32 +781,26 @@ private fun SessionRowItem(
         }
 
         if (menuOpen) {
-            DsDialog(title = null, onDismiss = { menuOpen = false }) {
-                SheetRow(title = stringResource(R.string.chatlist_session_rename)) {
-                    menuOpen = false
-                    renameOpen = true
-                }
-                SheetRow(title = stringResource(R.string.chatlist_session_fork)) {
-                    menuOpen = false
-                    scope.launch { store.forkSession(session.sessionId) }
-                }
-                if (pinned != null) {
-                    SheetRow(
-                        title = stringResource(if (pinned) R.string.chatlist_session_unpin else R.string.chatlist_session_pin),
-                    ) {
-                        menuOpen = false
-                        scope.launch { store.setPinned(session.sessionId, !pinned) }
+            HoldMenu(
+                onDismiss = { menuOpen = false },
+                preview = displaySessionTitle(session),
+                actions = buildList {
+                    add(HoldAction(stringResource(R.string.chatlist_session_rename), Icons.Outlined.Edit) { renameOpen = true })
+                    add(HoldAction(stringResource(R.string.chatlist_session_fork), Icons.AutoMirrored.Outlined.CallSplit) {
+                        scope.launch { store.forkSession(session.sessionId) }
+                    })
+                    if (pinned != null) {
+                        add(
+                            HoldAction(
+                                stringResource(if (pinned) R.string.chatlist_session_unpin else R.string.chatlist_session_pin),
+                                Icons.Outlined.PushPin,
+                            ) { scope.launch { store.setPinned(session.sessionId, !pinned) } },
+                        )
                     }
-                }
-                SheetRow(title = stringResource(R.string.chatlist_session_copy_id)) {
-                    menuOpen = false
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(session.sessionId))
-                }
-                SheetRow(title = stringResource(R.string.chatlist_session_archive)) {
-                    menuOpen = false
-                    archiveConfirmOpen = true
-                }
-            }
+                    add(HoldAction(stringResource(R.string.chatlist_session_copy_id), Icons.Outlined.ContentCopy) { copy(session.sessionId) })
+                    add(HoldAction(stringResource(R.string.chatlist_session_archive), Icons.Outlined.Archive) { archiveConfirmOpen = true })
+                },
+            )
         }
     }
 

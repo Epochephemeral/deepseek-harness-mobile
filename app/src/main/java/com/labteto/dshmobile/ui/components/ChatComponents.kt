@@ -59,6 +59,9 @@ import java.util.Locale
  *
  * The cap mirrors the harness's `max-width: min(525px, 82%)`, which is why this measures its parent
  * rather than hardcoding a dp: a flat 320dp was most of a phone's width and none of a tablet's.
+ *
+ * Holding the bubble opens what can be done with the message (see [holdable]). It used to offer
+ * nothing at all, so a prompt sent by mistake and then stopped could not even be copied back to fix.
  */
 
 /**
@@ -71,7 +74,13 @@ import java.util.Locale
 val LocalSelectionDismiss = staticCompositionLocalOf { mutableIntStateOf(0) }
 
 @Composable
-fun UserBubble(text: String, modifier: Modifier = Modifier) {
+fun UserBubble(
+    text: String,
+    modifier: Modifier = Modifier,
+    /** Opens the message's hold menu; null leaves the bubble inert, as it always was. */
+    onHold: (() -> Unit)? = null,
+    holdLabel: String = "",
+) {
     val colors = DsTheme.colors
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         Text(
@@ -80,6 +89,9 @@ fun UserBubble(text: String, modifier: Modifier = Modifier) {
             color = colors.labelPrimary,
             modifier = Modifier
                 .widthIn(max = minOf(525.dp, maxWidth * 0.82f))
+                // Only the bubble holds, not the empty width beside it: a press in the gutter of a
+                // scrolling transcript is a scroll that has not started yet.
+                .then(if (onHold != null) Modifier.holdable(holdLabel, onHold = onHold) else Modifier)
                 .background(colors.userBubble, DsShapes.bubble)
                 .border(1.dp, colors.borderL3, DsShapes.bubble)
                 .padding(horizontal = 16.dp, vertical = 10.dp),

@@ -59,6 +59,9 @@ fun ToolCard(
     /** Terminal state from the call's own result; null derives the running bit from the card. */
     state: DisclosureState? = null,
     header: (@Composable () -> Unit)? = null,
+    /** Opens the call's hold menu from the default header; a custom [header] wires its own. */
+    onHold: (() -> Unit)? = null,
+    holdLabel: String = "",
 ) {
     if (header != null) {
         header()
@@ -76,6 +79,8 @@ fun ToolCard(
         state = state ?: if (view.isRunning()) DisclosureState.Running else DisclosureState.Idle,
         expanded = expanded,
         onToggle = onToggle,
+        onHold = onHold,
+        holdLabel = holdLabel,
     ) {
         ToolCardBody(view)
     }
