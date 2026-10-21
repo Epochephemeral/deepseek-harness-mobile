@@ -3,6 +3,39 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [0.18.0] - 2026-10-21
+
+Pressing and holding things in the app now opens a menu of what you can do with them. This
+started with issue #60, which asked for a way to copy a sent message so it could be fixed and sent
+again.
+
+### Added
+
+- **Hold a message you sent** to copy it, select part of it, or put it back in the composer as a
+  new message. If the composer already has text in it, the app asks before replacing it. With
+  dsh-rewind-plugin installed the menu also has **Rewind to this message**. It withdraws the
+  message and everything after it and puts the message back in the composer, so the corrected
+  prompt replaces the wrong one. (#60)
+- **Hold a tool call** to copy the command it ran, the path, link or search it used, or what it
+  returned. A call on a file can also open the file or mention it in your next message.
+- **Hold a file** in the changed-files card or the workspace browser to copy its path or mention it
+  in your next message. Mentioning from the workspace closes it and leaves the reference in the
+  composer.
+- **Hold a queued message** to copy, edit, steer or remove it. Copy is new; the rest were already
+  in its ⋮ menu.
+- **Hold a prompt in the history sheet** to copy it or edit it as a new message.
+- **Hold Send while a turn runs** to choose, for that message only, whether it steers the running
+  turn or waits for the next one. The + sheet mentions this while a turn is running.
+
+### Changed
+
+- The session and workspace menus in the chat list now open in the same bottom sheet as every
+  other hold, with icons and the name of what you held at the top, and holding gives a haptic
+  tick. The workspace menu has a new **Copy path**.
+- Android 12 and older show "Copied" after a copy, since they have no system confirmation of their
+  own.
+- Text put back in the composer from the transcript takes focus and opens the keyboard.
+
 ## [0.17.0] - 2026-10-21
 
 Moves to DeepSeek Harness 0.2.1-rc.2, adds motion across the app, and makes connecting, reading

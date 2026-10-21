@@ -53,6 +53,9 @@ El [sitio del proyecto](https://dshm.zyphite.com) ofrece una presentación en un
 - Chatear con el agente. Las respuestas llegan en streaming con su razonamiento, los bloques de
   código y las llamadas a herramientas. Puedes adjuntar fotos y archivos, mencionar archivos con
   `@` y ejecutar comandos y habilidades con `/`.
+- Mantener pulsado un mensaje, una llamada a herramienta o un archivo para ver qué más puedes
+  hacer con él: copiarlo, corregir un mensaje enviado y volver a enviarlo, o mencionar un
+  archivo en tu próximo mensaje.
 - Responder a lo que el agente necesita de ti: aprobar o rechazar un comando, contestar sus
   preguntas y revisar un plan antes de que empiece.
 - Seguir de cerca los trabajos largos. Los objetivos, las listas de tareas pendientes, los

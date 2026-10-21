@@ -54,6 +54,9 @@ Le [site du projet](https://dshm.zyphite.com) présente l'application sur une se
 - Discutez avec l'agent. Les réponses s'affichent au fil de l'eau, avec leur raisonnement, leurs
   blocs de code et leurs appels d'outil. Vous pouvez joindre des photos et des fichiers, citer des
   fichiers avec `@`, et lancer des commandes et des compétences avec `/`.
+- Appuyez longuement sur un message, un appel d'outil ou un fichier pour voir ce que vous pouvez
+  en faire d'autre : le copier, corriger un message envoyé puis le renvoyer, ou citer un fichier
+  dans votre prochain message.
 - Répondez quand l'agent a besoin de vous : approuvez ou refusez une commande, répondez à ses
   questions, et relisez un plan avant qu'il ne démarre.
 - Gardez un œil sur les travaux longs. Les objectifs, les listes de tâches, les messages en file

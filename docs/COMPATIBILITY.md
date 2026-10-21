@@ -6,6 +6,7 @@ DSH Mobile speaks the DeepSeek Harness web-client protocol over `/api`. The prot
 
 | DSH Mobile | Harness | Notes |
 |---|---|---|
+| 0.18.0 | 0.2.1-rc.2 | Same protocol baseline as 0.17.0. Rewind to this message, from holding a sent message, needs dsh-rewind-plugin on the host |
 | 0.17.0 | 0.2.1-rc.2 | All 15 real-host conformance scenarios pass on rc.2, including a typed round trip through `terminal/attach`. The terminal falls back to follow-and-call on hosts before 0.2.1-alpha.3 |
 | 0.16.0 | 0.2.1-alpha.2 | All 14 real-host conformance scenarios passed across full and targeted runs; Android and signing gates in [validation](VALIDATION-0.16.0.md) |
 | 0.15.0 | 0.2.1-alpha.1 | Same protocol baseline as 0.13.0 |
