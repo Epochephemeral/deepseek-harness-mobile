@@ -636,4 +636,6 @@
     <string name="hold_replace_draft_title">แทนที่ร่างของคุณ?</string>
     <string name="hold_replace_draft_body">ช่องพิมพ์มีข้อความอยู่แล้ว การแก้ไขข้อความนี้จะแทนที่ข้อความนั้น</string>
     <string name="hold_replace_draft_confirm">แทนที่</string>
+    <string name="chatlist_show_all">แสดงทั้งหมด %1$d</string>
+    <string name="chatlist_show_less">แสดงน้อยลง</string>
 </resources>

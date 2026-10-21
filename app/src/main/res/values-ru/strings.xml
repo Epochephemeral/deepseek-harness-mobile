@@ -636,4 +636,6 @@
     <string name="hold_replace_draft_title">Заменить черновик?</string>
     <string name="hold_replace_draft_body">В поле ввода уже есть текст. Изменение этого сообщения заменит его.</string>
     <string name="hold_replace_draft_confirm">Заменить</string>
+    <string name="chatlist_show_all">Показать все %1$d</string>
+    <string name="chatlist_show_less">Показать меньше</string>
 </resources>

@@ -636,4 +636,6 @@
     <string name="hold_replace_draft_title">ڈرافٹ بدلیں؟</string>
     <string name="hold_replace_draft_body">کمپوزر میں پہلے سے متن موجود ہے۔ اس پیغام میں ترمیم اسے بدل دے گی۔</string>
     <string name="hold_replace_draft_confirm">بدلیں</string>
+    <string name="chatlist_show_all">سب %1$d دکھائیں</string>
+    <string name="chatlist_show_less">کم دکھائیں</string>
 </resources>

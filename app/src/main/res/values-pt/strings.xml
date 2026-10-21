@@ -636,4 +636,6 @@
     <string name="hold_replace_draft_title">Substituir o rascunho?</string>
     <string name="hold_replace_draft_body">O editor já tem texto. Editar esta mensagem vai substituí-lo.</string>
     <string name="hold_replace_draft_confirm">Substituir</string>
+    <string name="chatlist_show_all">Mostrar todos %1$d</string>
+    <string name="chatlist_show_less">Mostrar menos</string>
 </resources>

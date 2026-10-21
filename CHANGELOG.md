@@ -3,6 +3,15 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased]
+
+### Added
+
+- **Workspaces in the chat list preview their newest five sessions** instead of unfolding every
+  session at once. The rest sit behind a **Show all N** row under the preview, and **Show less**
+  puts them back away. A workspace that holds the session you are reading always keeps that
+  session visible, so opening the drawer mid-run never hides where you are.
+
 ## [0.18.0] - 2026-10-21
 
 Pressing and holding things in the app now opens a menu of what you can do with them. This
