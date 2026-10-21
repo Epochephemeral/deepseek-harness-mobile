@@ -9,6 +9,10 @@ Pressing and holding things in the app now opens a menu of what you can do with 
 started with issue #60, which asked for a way to copy a sent message so it could be fixed and sent
 again.
 
+| Holding a message you sent | After Rewind to this message | Holding a tool call | Holding Send during a turn |
+|---|---|---|---|
+| <img src="docs/images/0.18.0/hold-message.png" width="200" alt="Holding a message you sent"> | <img src="docs/images/0.18.0/rewind-result.png" width="200" alt="After Rewind to this message"> | <img src="docs/images/0.18.0/hold-tool-call.png" width="200" alt="Holding a tool call"> | <img src="docs/images/0.18.0/hold-send.png" width="200" alt="Holding Send during a turn"> |
+
 ### Added
 
 - **Hold a message you sent** to copy it, select part of it, or put it back in the composer as a
