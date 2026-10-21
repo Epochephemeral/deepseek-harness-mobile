@@ -204,6 +204,25 @@ class ChatTranscriptJumpTest {
     }
 
     @Test
+    fun aPickWhoseTurnRunsToTheTailLeavesTheReaderFollowing() {
+        val history = longHistory()
+        val h = harness(history)
+
+        // The newest prompt is not the tail itself (its reply is below it), but bringing it to the
+        // top runs out of rows below and stops at the tail. The reader is at the tail, so the next
+        // row must be pinned into view as it would be for anyone else sitting there.
+        compose.runOnIdle { h.jump = 58L }
+        compose.waitForIdle()
+        assertTrue(h.atTail())
+
+        compose.runOnIdle { h.nodes = history + user(60, "a new prompt") }
+        compose.waitForIdle()
+
+        assertTrue(h.atTail())
+        compose.onNodeWithText("a new prompt").assertIsDisplayed()
+    }
+
+    @Test
     fun aPickNoRowCarriesIsDroppedRatherThanRetried() {
         val h = harness(longHistory())
 

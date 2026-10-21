@@ -252,6 +252,11 @@ internal fun ChatTranscript(
             val item = info.visibleItemsInfo.firstOrNull { it.key == seq } ?: return@LaunchedEffect
             val contentEnd = info.viewportEndOffset - info.afterContentPadding
             listState.scrollBy((item.offset + item.size - contentEnd).toFloat())
+            // Read where the jump came to rest rather than leaving it to the scroll-session watcher:
+            // both scrolls start and finish inside one frame, so it never sees them. A newest prompt
+            // whose turn is shorter than the screen stops at the tail, and a reader left at the tail
+            // with following off would watch the next reply land out of view.
+            followTail = atTail()
         } finally {
             onJumpConsumed()
         }
