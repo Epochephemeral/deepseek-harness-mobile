@@ -51,6 +51,18 @@ interface RemoteStream {
 
     /** Tell the host to stop. Idempotent, and safe to call on an already-dead stream. */
     fun cancel()
+
+    /**
+     * Send one uplink item on a duplex stream (`terminal/attach`). Returns false when the stream
+     * has finished or its socket is gone, which is when the host can no longer take it.
+     *
+     * The value is sent as-is; budgeting against the endpoint's inbox window is the caller's job,
+     * because only the caller knows which items the host has acknowledged.
+     */
+    fun send(value: JsonElement): Boolean = false
+
+    /** Half-close the uplink. The host may go on sending until it ends the stream. */
+    fun endUplink() = Unit
 }
 
 /**
@@ -95,6 +107,16 @@ class RemoteStreamMux(
                 done.set(true)
                 null
             }
+        }
+
+        override fun send(value: JsonElement): Boolean {
+            if (done.get() || closedCause != null || !streams.containsKey(streamId)) return false
+            return this@RemoteStreamMux.send(RemoteStreamClientMessage.Item(streamId = streamId, value = value))
+        }
+
+        override fun endUplink() {
+            if (done.get() || closedCause != null || !streams.containsKey(streamId)) return
+            this@RemoteStreamMux.send(RemoteStreamClientMessage.End(streamId = streamId))
         }
 
         override fun cancel() {

@@ -94,6 +94,11 @@ object EventClassification {
         "session/title-llm-request",
         // Current directory is surfaced by the workingDirectory projection in session details.
         "working-directory/change",
+        // Harness 0.2.1-alpha.3: every background bash/pwsh/subagent/workflow job is recorded when it
+        // starts and when it settles. The tool card that started it and the Details jobs list
+        // already carry both facts; as rows they were raw JSON after every background command.
+        "job/registered",
+        "job/settled",
     )
 
     /**

@@ -223,27 +223,37 @@ private fun TerminalScreen(store: SessionStore, key: ComposerKey, initial: WebTe
     LaunchedEffect(ready, reconnect, connection, store.muxForHost(key.host)) {
         if (!ready) return@LaunchedEffect
         connected = false; writable = false; error = null
-        while (input.tryReceive().isSuccess) { /* Discard input from the previous controller. */ }
+        while (input.tryReceive().isSuccess) { /* Discard input meant for the previous attachment. */ }
         try {
             val api = store.apiForHost(key.host) ?: error(context.getString(R.string.common_offline))
             val mux = store.muxForHost(key.host) ?: error(context.getString(R.string.common_offline))
-            environment = api.terminalEnvironment(key.sessionId).requireValue()
-            var sequence: Long? = null
-            mux.openStream("terminal/follow", buildJsonObject {
-                put("agentId", JsonPrimitive(key.sessionId)); put("id", JsonPrimitive(initial.id)); put("attachmentId", JsonPrimitive(attachmentId))
-            }).collect { raw ->
-                val frame = decodeFromJsonElement(TerminalFrame.serializer(), raw)
-                if (frame.type == "snapshot") { sequence = frame.sequence; connected = true }
-                else if (frame.type == "output") {
-                    val next = frame.sequence ?: error(context.getString(R.string.panel_changed))
-                    if (sequence == null || next != sequence!! + 1) error(context.getString(R.string.panel_changed))
-                    sequence = next
-                }
-                frame.info?.let { info = it }
-                writable = connected && info.state == "running" && info.controllerId == attachmentId
-                view.evaluateJavascript("renderFrame(${raw})", null)
+            val env = api.terminalEnvironment(key.sessionId).requireValue()
+            environment = env
+            val attached = attachDuplex(mux, api, key, initial, env, view, input,
+                onFrame = { frame, isWritable ->
+                    if (frame.type == "snapshot") connected = true
+                    frame.info?.let { info = it }
+                    if (isWritable != null) writable = connected && info.state == "running" && isWritable
+                },
+                onInputRefused = { error = context.getString(R.string.panel_too_large) },
+                gapMessage = context.getString(R.string.panel_changed),
+            )
+            if (!attached) {
+                // A host before 0.2.1-alpha.3 has no duplex attach. It streams the screen on
+                // `terminal/follow` and takes input as separate calls, with control decided by
+                // which attachment id the host names as controller.
+                followLegacy(mux, api, key, initial, attachmentId, env, view, input,
+                    onFrame = { frame ->
+                        if (frame.type == "snapshot") connected = true
+                        frame.info?.let { info = it }
+                        writable = connected && info.state == "running" && info.controllerId == attachmentId
+                    },
+                    isWritable = { writable },
+                    onInputFailed = { message -> writable = false; error = message },
+                    gapMessage = context.getString(R.string.panel_changed),
+                    tooLargeMessage = context.getString(R.string.panel_too_large),
+                )
             }
-            connected = false; writable = false
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message }
         finally { connected = false; writable = false }
@@ -269,30 +279,6 @@ private fun TerminalScreen(store: SessionStore, key: ComposerKey, initial: WebTe
         catch (_: Exception) { /* No retention service composed, or the terminal is already gone. */ }
     }
 
-    LaunchedEffect(input, attachmentId) {
-        for (message in input) {
-            if (!writable) continue
-            val env = environment ?: continue
-            val api = store.apiForHost(key.host) ?: continue
-            try {
-                val json = JSONObject(message)
-                when (json.optString("type")) {
-                    "input" -> {
-                        val data = json.optString("data")
-                        if (data.toByteArray(Charsets.UTF_8).size > env.maxInputBytes) error(context.getString(R.string.panel_too_large))
-                        api.terminalWrite(key.sessionId, initial.id, attachmentId, data).requireValue()
-                    }
-                    "resize" -> {
-                        val cols = json.optInt("cols").coerceIn(2, env.maxCols)
-                        val rows = json.optInt("rows").coerceIn(1, env.maxRows)
-                        api.terminalResize(key.sessionId, initial.id, attachmentId, cols, rows).requireValue()
-                        view.evaluateJavascript("term.resize($cols,$rows)", null)
-                    }
-                }
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { writable = false; error = e.message }
-        }
-    }
     Column(modifier.fillMaxWidth()) {
         if (!connected || !writable) Row {
             Text(if (connected) stringResource(R.string.terminal_readonly) else stringResource(R.string.common_offline), Modifier.weight(1f).padding(12.dp))
@@ -301,5 +287,177 @@ private fun TerminalScreen(store: SessionStore, key: ComposerKey, initial: WebTe
         if (info.state != "running") Text(stringResource(if (info.state == "failed") R.string.common_error else R.string.chat_stopped) + " (${info.exitCode ?: "—"})", Modifier.padding(12.dp))
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp)) }
         AndroidView(factory = { view }, modifier = Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+/** Gateway answers meaning the host has no such stream, as opposed to refusing this request. */
+private val NO_DUPLEX = setOf(
+    "gateway/method-unavailable",
+    "gateway/invocation-unavailable",
+    "gateway/arguments-invalid",
+    "capability-unavailable",
+)
+
+/**
+ * Run one `terminal/attach` attachment (harness 0.2.1-alpha.3 and later) until it ends.
+ *
+ * Output arrives on the stream's downlink and input leaves on its uplink as numbered commands;
+ * [TerminalInputLedger] keeps those within the host's window and releases them on `ack`. Input
+ * and resizes from the page are pumped onto the uplink by a sibling coroutine for as long as the
+ * stream is open.
+ *
+ * Returns false, having done nothing visible, when the host has no duplex attach at all, so the
+ * caller can fall back to the older follow-and-call protocol.
+ */
+private suspend fun attachDuplex(
+    mux: com.labteto.dshmobile.core.wire.RemoteStreamMux,
+    api: com.labteto.dshmobile.core.wire.DshApiClient,
+    key: ComposerKey,
+    terminal: WebTerminalInfo,
+    env: TerminalEnvironment,
+    view: WebView,
+    input: Channel<String>,
+    onFrame: (TerminalFrame, Boolean?) -> Unit,
+    onInputRefused: () -> Unit,
+    gapMessage: String,
+): Boolean = coroutineScope {
+    val stream = mux.open("terminal/attach", api.terminalAttachArgs(key.sessionId, terminal.id))
+    val ledger = com.labteto.dshmobile.core.wire.TerminalInputLedger(env.maxInputBytes, env.maxBufferedBytes)
+    var writable = false
+    var cols = terminal.cols
+    var rows = terminal.rows
+    fun flush() {
+        if (!writable) return
+        for (command in ledger.drain()) {
+            if (!stream.send(command)) error(gapMessage)
+        }
+    }
+    var pump: Job? = null
+    try {
+        var outputSequence: Long? = null
+        while (true) {
+            val raw = try {
+                stream.receive()
+            } catch (e: com.labteto.dshmobile.core.wire.RemoteStreamException) {
+                if (outputSequence == null && !e.carrier && e.error.code in NO_DUPLEX) return@coroutineScope false
+                throw e
+            } ?: break
+            val frame = decodeFromJsonElement(TerminalFrame.serializer(), raw)
+            when (frame.type) {
+                "snapshot" -> {
+                    outputSequence = frame.sequence
+                    ledger.window = frame.inputWindow
+                    frame.info?.let { cols = it.cols; rows = it.rows }
+                    writable = frame.writable == true && frame.info?.state == "running"
+                    onFrame(frame, frame.writable == true)
+                    view.evaluateJavascript("renderFrame($raw)", null)
+                    if (pump == null) pump = launch {
+                        for (message in input) {
+                            val json = runCatching { JSONObject(message) }.getOrNull() ?: continue
+                            if (!writable) continue
+                            val accepted = when (json.optString("type")) {
+                                "input" -> ledger.write(json.optString("data"))
+                                "resize" -> {
+                                    val c = json.optInt("cols").coerceIn(2, env.maxCols)
+                                    val r = json.optInt("rows").coerceIn(1, env.maxRows)
+                                    if (c == cols && r == rows) {
+                                        true
+                                    } else {
+                                        ledger.resize(c, r).also { ok ->
+                                            if (ok) {
+                                                cols = c; rows = r
+                                                view.evaluateJavascript("term.resize($c,$r)", null)
+                                            }
+                                        }
+                                    }
+                                }
+                                else -> true
+                            }
+                            if (!accepted) onInputRefused() else flush()
+                        }
+                    }
+                }
+                "output" -> {
+                    val next = frame.sequence ?: error(gapMessage)
+                    val previous = outputSequence ?: error(gapMessage)
+                    if (next != previous + 1) error(gapMessage)
+                    outputSequence = next
+                    view.evaluateJavascript("renderFrame($raw)", null)
+                }
+                "state" -> {
+                    writable = frame.writable == true && frame.info?.state == "running"
+                    onFrame(frame, frame.writable == true)
+                    flush()
+                }
+                "ack" -> {
+                    if (!ledger.acknowledge(frame.sequence ?: -1)) error(gapMessage)
+                    if (frame.refusal != null) {
+                        writable = false
+                        onFrame(frame, false)
+                    }
+                    flush()
+                }
+            }
+        }
+        true
+    } finally {
+        pump?.cancel()
+        stream.cancel()
+    }
+}
+
+/** The pre-alpha.3 terminal: `terminal/follow` for the screen, unary write and resize for input. */
+private suspend fun followLegacy(
+    mux: com.labteto.dshmobile.core.wire.RemoteStreamMux,
+    api: com.labteto.dshmobile.core.wire.DshApiClient,
+    key: ComposerKey,
+    terminal: WebTerminalInfo,
+    attachmentId: String,
+    env: TerminalEnvironment,
+    view: WebView,
+    input: Channel<String>,
+    onFrame: (TerminalFrame) -> Unit,
+    isWritable: () -> Boolean,
+    onInputFailed: (String?) -> Unit,
+    gapMessage: String,
+    tooLargeMessage: String,
+) = coroutineScope {
+    val pump = launch {
+        for (message in input) {
+            if (!isWritable()) continue
+            try {
+                val json = JSONObject(message)
+                when (json.optString("type")) {
+                    "input" -> {
+                        val data = json.optString("data")
+                        if (data.toByteArray(Charsets.UTF_8).size > env.maxInputBytes) error(tooLargeMessage)
+                        api.terminalWrite(key.sessionId, terminal.id, attachmentId, data).requireValue()
+                    }
+                    "resize" -> {
+                        val cols = json.optInt("cols").coerceIn(2, env.maxCols)
+                        val rows = json.optInt("rows").coerceIn(1, env.maxRows)
+                        api.terminalResize(key.sessionId, terminal.id, attachmentId, cols, rows).requireValue()
+                        view.evaluateJavascript("term.resize($cols,$rows)", null)
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onInputFailed(e.message) }
+        }
+    }
+    try {
+        var sequence: Long? = null
+        mux.openStream("terminal/follow", api.terminalFollowArgs(key.sessionId, terminal.id, attachmentId)).collect { raw ->
+            val frame = decodeFromJsonElement(TerminalFrame.serializer(), raw)
+            if (frame.type == "snapshot") sequence = frame.sequence
+            else if (frame.type == "output") {
+                val next = frame.sequence ?: error(gapMessage)
+                if (sequence == null || next != sequence!! + 1) error(gapMessage)
+                sequence = next
+            }
+            onFrame(frame)
+            view.evaluateJavascript("renderFrame($raw)", null)
+        }
+    } finally {
+        pump.cancel()
     }
 }

@@ -112,7 +112,9 @@ class Harness021ConformanceTest {
         java.io.File(nextDirectory, "package.json").writeText(java.io.File(directory, "package.json").readText().replace("1.0.0", "1.0.1"))
         for (file in listOf("cordis.patch.yml", "plugin.mjs")) java.io.File(directory, file).copyTo(java.io.File(nextDirectory, file))
         val nextSpec = "file:" + nextDirectory.absolutePath.replace('\\', '/')
-        val updated = withTimeout(90_000) { client.api.installPlugin(nextSpec, PluginInstallOptions(enabled = false, requestId = UUID.randomUUID().toString())).featureValue() }
+        // 0.2.1-alpha.3 with hot reload refuses to install over an installed package; the update is
+        // remove-then-install, the same sequence the app runs for its Update action.
+        val updated = withTimeout(90_000) { client.api.installOrReplacePlugin(nextSpec, PluginInstallOptions(enabled = false, requestId = UUID.randomUUID().toString()), replaces = name).featureValue() }
         assertTrue("$updated", updated.changed)
         assertEquals("1.0.1", updated.version)
         assertFalse("updating preserves disabled state", client.api.pluginBundles().featureValue().single { it.name == name }.enabled)

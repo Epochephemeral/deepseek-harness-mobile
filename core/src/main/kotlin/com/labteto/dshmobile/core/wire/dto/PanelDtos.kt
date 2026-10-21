@@ -17,14 +17,23 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class WorkspaceFileWatchFrame(val kind: String, val change: WorkspaceFileChange? = null)
 
 @Serializable data class TerminalShell(val path: String, val args: List<String> = emptyList(), val name: String)
+/** [maxBufferedBytes] arrived with the duplex terminal (0.2.1-alpha.3) and is absent before it. */
 @Serializable data class TerminalEnvironment(val cwd: String, val maxInputBytes: Int, val maxCols: Int,
-    val maxRows: Int, val scrollback: Int)
+    val maxRows: Int, val scrollback: Int, val maxBufferedBytes: Int? = null)
+/** [controllerId] is the pre-alpha.3 input-control marker; duplex hosts send `writable` on frames instead. */
 @Serializable data class WebTerminalInfo(val id: String, val title: String, val shell: TerminalShell,
     val cwd: String, val cols: Int, val rows: Int, val state: String, val exitCode: Int? = null,
     val error: String? = null, val controllerId: String? = null)
 @Serializable data class TerminalCreateRequest(val id: String, val cols: Int, val rows: Int, val shellPath: String? = null)
+/** The host's uplink inbox budget for one duplex stream (`RemoteUplinkWindow`). */
+@Serializable data class RemoteUplinkWindow(val maxBytes: Int, val frameOverheadBytes: Int)
+/**
+ * One `terminal/attach` (or legacy `terminal/follow`) frame: `snapshot`, `output`, `state`, and on
+ * duplex hosts `ack`, which acknowledges input command [sequence] and may carry a [refusal].
+ */
 @Serializable data class TerminalFrame(val type: String, val sequence: Long? = null, val screen: String? = null,
-    val info: WebTerminalInfo? = null, val data: String? = null)
+    val info: WebTerminalInfo? = null, val data: String? = null, val writable: Boolean? = null,
+    val inputWindow: RemoteUplinkWindow? = null, val refusal: String? = null)
 
 @Serializable data class MessageFeedbackItem(val messageId: String, val rating: String, val version: String,
     val createdAt: Long, val updatedAt: Long, val note: String? = null, val category: String? = null)
