@@ -1,5 +1,6 @@
 package com.labteto.dshmobile.ui.screens.main
 
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,10 +102,10 @@ internal fun ChatTranscript(
     context: ChatNodeContext,
     listState: LazyListState,
     onLoadOlder: () -> Unit,
+    modifier: Modifier = Modifier,
     /** A message the reader picked out of the history sheet, still waiting to be scrolled to. */
     jumpToSeq: Long? = null,
     onJumpConsumed: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     // Only the nodes that draw something: a zero-height item still costs its 4dp gap, and a turn's
     // worth of structural events stacks those gaps into a blank band under the chrome.
@@ -167,9 +168,6 @@ internal fun ChatTranscript(
         }
     }
 
-    // A pick from the history sheet, handled below once paging state is known: a pick older than
-    // the loaded page has to ask for the next one.
-
     // Reaching the oldest loaded message pulls the next page. The guard matters: this effect sits
     // above the `loading` early return, so without it the trigger would fire against an empty list
     // and race the initial history fetch. It also re-arms once a page lands, which is what fills
@@ -226,27 +224,37 @@ internal fun ChatTranscript(
     // A pick from the history sheet. The sheet knows only sequences; which row index a sequence owns
     // is decided by the grouping above, so the lookup happens here rather than there.
     //
-    // `requestScrollToItem` rather than the suspend `scrollToItem`: the target is usually far off
-    // screen and therefore unmeasured, and a pick is a jump, not a journey — animating a hundred
-    // screens of rows would burn frames to show the reader nothing they asked to see.
+    // Keyed on the pick alone. Re-running on every row change would restart a jump halfway through
+    // whenever a running reply added a row, and the sheet only offers prompts that are loaded, so
+    // there is no later page worth waiting for. The pick is consumed however the jump ends —
+    // landed, missed, or cut short by the reader's own drag — so a leftover cannot fire later and
+    // pull them back.
     //
     // Following the tail is switched off first, or the next row a running reply adds would pin the
     // tail back under a reader who deliberately left it. Picking the tail itself keeps it on.
-    LaunchedEffect(jumpToSeq, rows.size, canPage) {
+    LaunchedEffect(jumpToSeq) {
         val seq = jumpToSeq ?: return@LaunchedEffect
-        val index = historyRowIndex(rows, seq)
-        if (index == null) {
-            // Older than the page that is loaded. Fetching it is not a failure to report: the effect
-            // re-runs on the row-count change and retries the lookup, so a pick a thousand messages
-            // back lands without the reader watching anything happen. Once paging is exhausted the
-            // pick cannot be honoured at all — consuming it stops it from firing again on the next
-            // unrelated change.
-            if (canPage) onLoadOlder() else onJumpConsumed()
-            return@LaunchedEffect
+        try {
+            val index = historyRowIndex(rows, seq) ?: return@LaunchedEffect
+            if (index == 0) {
+                followTail = true
+                listState.requestScrollToItem(0)
+                return@LaunchedEffect
+            }
+            followTail = false
+            // The prompt goes to the top of the viewport, not the bottom. A reversed list puts the
+            // item it scrolls to at its start, which is the bottom edge: the prompt would sit on the
+            // composer with the reply it asked for out of view below it, and the screen filled with
+            // the turn before. Both steps are instant; the second needs the prompt measured, since
+            // its height decides how far back to come, and clamps at the tail on its own.
+            listState.scrollToItem(index)
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.key == seq } ?: return@LaunchedEffect
+            val contentEnd = info.viewportEndOffset - info.afterContentPadding
+            listState.scrollBy((item.offset + item.size - contentEnd).toFloat())
+        } finally {
+            onJumpConsumed()
         }
-        followTail = index == 0
-        listState.requestScrollToItem(index)
-        onJumpConsumed()
     }
 
     if (loading) {
@@ -326,10 +334,11 @@ private const val STREAMING_ROW_KEY = "streaming-tail"
  *
  * [offerManual] is the third case: automatic paging has spent its budget on a session whose events
  * are mostly not messages, so the list may still be too short to scroll. Without a button there
- * would be nothing left to trigger a page, and the rest of the history would be unreachable.
+ * would be nothing left to trigger a page, and the rest of the history would be unreachable. The
+ * history sheet always passes it: nothing scrolls a sheet to its end to page for it.
  */
 @Composable
-private fun LoadOlderRow(
+internal fun LoadOlderRow(
     loading: Boolean,
     failed: Boolean,
     offerManual: Boolean,

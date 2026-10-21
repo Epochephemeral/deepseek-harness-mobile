@@ -142,6 +142,12 @@ fun ChatScreen(
     // here rather than inside the transcript because the pick is made in a sheet that outlives no
     // layout of its own, and it has to survive the sheet closing.
     var pendingJumpSeq by remember { mutableStateOf<Long?>(null) }
+    // Each event's time by sequence, for the transcript's timestamps and the history sheet's. Built
+    // once per journal rather than on every recomposition: a streaming reply recomposes this screen
+    // many times a second without adding a single durable event.
+    val eventTimes = remember(conversation?.journal) {
+        conversation?.journal?.associate { it.seq to it.time }.orEmpty()
+    }
     // A decorated command's picker (the phone's `popupSelect`), keyed by the command it serves.
     var popup by remember(composer.key) { mutableStateOf<Pair<String, CommandUiSpec.PopupSelect>?>(null) }
 
@@ -467,7 +473,7 @@ fun ChatScreen(
 
             val nodeContext = ChatNodeContext(
                 nodes = conversation?.nodes ?: emptyList(),
-                eventTimes = conversation?.journal?.associate { it.seq to it.time }.orEmpty(),
+                eventTimes = eventTimes,
                 running = conversation?.running == true,
                 cwd = workingDirectory,
                 onOpenSubagent = { childId ->
@@ -731,11 +737,17 @@ fun ChatScreen(
         )
         ChatSheet.Models -> ModelsSheet(models = models, store = store, onDismiss = { sheet = null })
         ChatSheet.History -> HistorySheet(
-            entries = historyEntries(
-                nodes = conversation?.nodes.orEmpty(),
-                running = conversation?.running == true,
-                eventTimes = conversation?.journal?.associate { it.seq to it.time }.orEmpty(),
-            ),
+            entries = remember(conversation?.nodes, conversation?.running, eventTimes) {
+                historyEntries(
+                    nodes = conversation?.nodes.orEmpty(),
+                    running = conversation?.running == true,
+                    eventTimes = eventTimes,
+                )
+            },
+            hasMore = conversation?.hasMore == true,
+            loadingOlder = loadingOlder,
+            loadOlderFailed = loadOlderFailed,
+            onLoadOlder = { scope.launch { store.loadOlder() } },
             onPick = { seq ->
                 // Closing first: the scroll happens on the transcript's next composition, and
                 // leaving the sheet over it would hide the very message the pick was for.

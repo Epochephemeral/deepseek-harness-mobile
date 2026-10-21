@@ -46,10 +46,19 @@ import com.labteto.dshmobile.ui.theme.DsType
  *
  * Search is offered only once the list is long enough that scanning it would be slower than typing,
  * matching how the model sheet decides the same thing.
+ *
+ * The list is the loaded history, not the whole session: a session opens on its last sixty
+ * messages, which in a tool-heavy one is only a few prompts. While older history exists, the foot
+ * of the sheet pages it in — the transcript's own row, so loading, failure and retry read the same
+ * in both places — and the prompts it carries join the list below the ones already shown.
  */
 @Composable
 internal fun HistorySheet(
     entries: List<HistoryEntry>,
+    hasMore: Boolean,
+    loadingOlder: Boolean,
+    loadOlderFailed: Boolean,
+    onLoadOlder: () -> Unit,
     onPick: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -63,30 +72,37 @@ internal fun HistorySheet(
         subtitle = if (entries.isEmpty()) null else entries.size.toString(),
         onDismiss = onDismiss,
     ) {
-        if (entries.isEmpty()) {
-            Text(
-                stringResource(R.string.chat_history_empty),
-                style = DsType.caption11,
-                color = colors.labelTertiary,
-            )
-            return@DsBottomSheet
-        }
         if (entries.size > SEARCH_FROM) ChatSearchField(query, { query = it })
-        if (shown.isEmpty()) {
-            Text(
+        when {
+            // Nothing loaded yet is not "nothing sent" while there is history left to page in.
+            entries.isEmpty() -> if (!hasMore) {
+                Text(
+                    stringResource(R.string.chat_history_empty),
+                    style = DsType.caption11,
+                    color = colors.labelTertiary,
+                )
+            }
+            shown.isEmpty() -> Text(
                 stringResource(R.string.chat_history_no_match),
                 style = DsType.small13,
                 color = colors.labelSecondary,
             )
-            return@DsBottomSheet
-        }
-        LazyColumn(
-            modifier = Modifier.heightIn(max = 440.dp),
-            verticalArrangement = Arrangement.spacedBy(DsSpacing.tiny),
-        ) {
-            items(shown, key = { it.seq }) { entry ->
-                HistoryRow(entry = entry, onClick = { onPick(entry.seq) })
+            else -> LazyColumn(
+                modifier = Modifier.heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(DsSpacing.tiny),
+            ) {
+                items(shown, key = { it.seq }) { entry ->
+                    HistoryRow(entry = entry, onClick = { onPick(entry.seq) })
+                }
             }
+        }
+        if (hasMore) {
+            LoadOlderRow(
+                loading = loadingOlder,
+                failed = loadOlderFailed,
+                offerManual = true,
+                onRetry = onLoadOlder,
+            )
         }
     }
 }

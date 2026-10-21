@@ -37,6 +37,10 @@ internal data class HistoryEntry(
  * A prompt with no text still belongs here when it carried an image: a screenshot pasted with a
  * one-line request is something the reader sent, and dropping it would leave a gap in the list at
  * the exact place they remember sending something.
+ *
+ * Only what is loaded. A session opens on its last sixty messages, and in a tool-heavy session
+ * that is a handful of prompts; the sheet pages further back on request, the way the transcript
+ * does, rather than this pretending the rest of the log is here.
  */
 internal fun historyEntries(
     nodes: List<ChatNode>,
@@ -55,11 +59,25 @@ internal fun historyEntries(
     }
     .asReversed()
 
-/** A prompt is its own row — only tool calls and injected context group — so the row carries it. */
+/**
+ * A prompt is its own row — only tool calls and injected context group — so the row carries it.
+ *
+ * The sheet lists prompts from the same loaded nodes the rows are built from, so a miss means the
+ * message went away under an open sheet (a rewind, a session switch), not that it is still to load.
+ */
 internal fun historyRowIndex(rows: List<TranscriptRow>, seq: Long): Int? =
     rows.indexOfFirst { it.seq == seq }.takeIf { it >= 0 }
 
-/** A picker query against a prompt: the same subsequence match the model sheet uses. */
-internal fun historyMatches(query: String, text: String): Boolean = modelSearchMatches(query, text)
+/**
+ * A picker query against a prompt: every word of the query appears somewhere in it, in any order.
+ *
+ * Not the model sheet's subsequence match. That one is built for short identifiers, where "dsv4"
+ * should find "deepseek-v4"; against a paragraph of prose nearly any short word is a subsequence,
+ * so "fix" would keep almost every prompt and the filter would hide nothing.
+ */
+internal fun historyMatches(query: String, text: String): Boolean {
+    val haystack = text.lowercase()
+    return query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }.all { it in haystack }
+}
 
 private const val IMAGE_BLOCK_KIND = "image"

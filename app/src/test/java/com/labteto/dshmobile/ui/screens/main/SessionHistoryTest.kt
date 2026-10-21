@@ -160,4 +160,15 @@ class SessionHistoryTest {
         assertTrue(historyMatches("", "anything"))
         assertFalse(historyMatches("zzz", "the transcript follow tail fix"))
     }
+
+    @Test
+    fun `search wants each word whole, not scattered through the prompt`() {
+        // f-i-x is a subsequence of this sentence, so the model sheet's matcher would keep it. On
+        // prose that keeps nearly everything, which is a filter that filters nothing.
+        val prompt = "the first time I exit the app it forgets the session"
+
+        assertFalse(historyMatches("fix", prompt))
+        assertTrue(historyMatches("FORGETS first", prompt))
+        assertTrue(historyMatches("  exit  ", prompt))
+    }
 }
