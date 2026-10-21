@@ -607,4 +607,8 @@
     <string name="update_copy_command">复制安装命令</string>
     <string name="update_install_started">正在 Termux 中下载。下载完成后会打开安装程序。</string>
     <string name="update_install_failed">Termux 无法安装此更新（%1$s）。</string>
+    <string name="chat_history_title">历史记录</string>
+    <string name="chat_history_empty">还没有发送过消息。</string>
+    <string name="chat_history_no_match">没有匹配的消息。</string>
+    <string name="chat_history_image">图片</string>
 </resources>

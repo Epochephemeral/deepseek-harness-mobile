@@ -5,6 +5,15 @@ All notable changes to DSH Mobile are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- A history button beside the model chip lists the messages you sent in this session, with each
+  one's time, a search field once the list is long, and a marker for prompts that carried an image.
+  Picking one jumps the transcript to it, with the prompt at the top of the screen and its reply
+  below. The list covers the history loaded so far; while there is more, "Load older messages" at
+  the foot of the sheet pages it in. Replies are not listed: the harness records a turn as many
+  assistant steps, so the few hundred of them would bury the prompts you were looking for.
+
 ### Fixed
 
 - The transcript now keeps up with a reply that adds rows. A tool card, the next message segment,
