@@ -137,6 +137,14 @@ internal fun CommandSheet(
             style = DsType.caption11,
             color = colors.labelTertiary,
         )
+        // The per-message version of this choice is a hold on send, which nothing else points at.
+        if (running) {
+            Text(
+                stringResource(R.string.hold_send_tip),
+                style = DsType.caption11,
+                color = colors.labelTertiary,
+            )
+        }
 
         if (searchable) {
             TextField(

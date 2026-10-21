@@ -67,6 +67,19 @@ object RewindDecoration : CommandDecoration {
         return parseCandidates((outcome as CommandOutcome.Ok).text.orEmpty())
     }
 
+    /**
+     * The flow for one message picked outside the sheet, by holding its bubble: it starts at the
+     * mode step, as a pick from the candidate list would. Whether the host can reach the message is
+     * still the plugin's call; a refusal shows in the sheet, the same as one after a list pick.
+     */
+    fun fromMessage(ctx: CommandContext, seq: Long, preview: String): SelectStep =
+        modeStep(
+            ctx,
+            seq,
+            if (preview.isBlank()) res(R.string.rewind_no_text)
+            else preview.lineSequence().joinToString(" ").take(PREVIEW_CHARS).ui(),
+        )
+
     /** Port of `rewindCandidatesFromHostText`. */
     fun parseCandidates(text: String): List<Candidate> {
         if (!text.startsWith(CANDIDATE_LIST_HEADER)) return emptyList()
@@ -175,6 +188,8 @@ object RewindDecoration : CommandDecoration {
         is CommandOutcome.Unknown -> res(R.string.err_command_unknown, line)
     }
 
+    /** The plugin's own preview length, so a held message's title reads like a listed one's. */
+    private const val PREVIEW_CHARS = 80
     private const val CANDIDATE_LIST_HEADER = "candidates="
     private const val CLEANUP_COMMAND = "snapshot-auto-cleanup"
     private const val MODE_CHAT = "chat"

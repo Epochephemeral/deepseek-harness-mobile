@@ -226,7 +226,7 @@ internal fun SubagentsSheet(
             }
         }
     }
-    if (childPanel && childId != null) WorkspacePanels(store, store.panels.get(ComposerKey(store.activeHostKey.orEmpty(), childId))) { childPanel = false }
+    if (childPanel && childId != null) WorkspacePanels(store, store.panels.get(ComposerKey(store.activeHostKey.orEmpty(), childId)), onDismiss = { childPanel = false })
 }
 
 @Composable

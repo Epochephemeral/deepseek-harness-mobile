@@ -68,6 +68,9 @@ fun DisclosureRow(
     expanded: Boolean = false,
     onToggle: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** Opens the row's [HoldMenu]; only honoured on a row that also toggles. */
+    onHold: (() -> Unit)? = null,
+    holdLabel: String = "",
     content: (@Composable () -> Unit)? = null,
 ) {
     val colors = DsTheme.colors
@@ -80,7 +83,17 @@ fun DisclosureRow(
                 .fillMaxWidth()
                 .heightIn(min = 24.dp)
                 .then(
-                    if (onToggle != null) {
+                    if (onToggle != null && onHold != null) {
+                        Modifier
+                            .hoverable(interaction)
+                            .clickableWithHold(
+                                holdLabel = holdLabel,
+                                onHold = onHold,
+                                role = Role.Button,
+                                interactionSource = interaction,
+                                onClick = onToggle,
+                            )
+                    } else if (onToggle != null) {
                         Modifier
                             .hoverable(interaction)
                             .clickable(

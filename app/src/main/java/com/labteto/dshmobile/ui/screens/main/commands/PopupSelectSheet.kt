@@ -77,10 +77,15 @@ internal fun PopupSelectSheet(
     command: String,
     spec: CommandUiSpec.PopupSelect,
     context: CommandContext,
+    /**
+     * Opens on this step rather than on the spec's own list, for a flow entered from somewhere
+     * that has already made the first pick, as holding a message makes rewind's.
+     */
+    initialStep: SelectStep? = null,
     onDismiss: () -> Unit,
 ) {
     val colors = DsTheme.colors
-    var step by remember { mutableStateOf<SelectStep?>(null) }
+    var step by remember { mutableStateOf(initialStep) }
     var options by remember { mutableStateOf<List<SelectOption>>(emptyList()) }
     var note by remember { mutableStateOf<UiText?>(null) }
     var loading by remember { mutableStateOf(true) }

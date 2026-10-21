@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.labteto.dshmobile.R
 import com.labteto.dshmobile.ui.components.DsBottomSheet
 import com.labteto.dshmobile.ui.components.DsPill
+import com.labteto.dshmobile.ui.components.clickableWithHold
 import com.labteto.dshmobile.ui.components.relativeTime
 import com.labteto.dshmobile.ui.theme.DsSpacing
 import com.labteto.dshmobile.ui.theme.DsTheme
@@ -61,9 +62,12 @@ internal fun HistorySheet(
     onLoadOlder: () -> Unit,
     onPick: (Long) -> Unit,
     onDismiss: () -> Unit,
+    /** Puts a listed prompt back in the composer; null offers only the copy. */
+    onEdit: ((String) -> Unit)? = null,
 ) {
     val colors = DsTheme.colors
     var query by remember { mutableStateOf("") }
+    var held by remember { mutableStateOf<HistoryEntry?>(null) }
     val shown = remember(entries, query) {
         if (query.isBlank()) entries else entries.filter { historyMatches(query, it.text) }
     }
@@ -92,7 +96,12 @@ internal fun HistorySheet(
                 verticalArrangement = Arrangement.spacedBy(DsSpacing.tiny),
             ) {
                 items(shown, key = { it.seq }) { entry ->
-                    HistoryRow(entry = entry, onClick = { onPick(entry.seq) })
+                    HistoryRow(
+                        entry = entry,
+                        onClick = { onPick(entry.seq) },
+                        // An image-only prompt has no words to copy or edit, so it keeps the tap alone.
+                        onHold = if (entry.text.isNotEmpty()) ({ held = entry }) else null,
+                    )
                 }
             }
         }
@@ -105,16 +114,26 @@ internal fun HistorySheet(
             )
         }
     }
+    held?.let { entry ->
+        PromptHoldMenu(
+            text = entry.text,
+            onEdit = onEdit?.let { edit -> { text: String -> onDismiss(); edit(text) } },
+            onDismiss = { held = null },
+        )
+    }
 }
 
 /** One prompt: when it was sent, and enough of it to recognise. */
 @Composable
-private fun HistoryRow(entry: HistoryEntry, onClick: () -> Unit) {
+private fun HistoryRow(entry: HistoryEntry, onClick: () -> Unit, onHold: (() -> Unit)?) {
     val colors = DsTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(
+                if (onHold != null) Modifier.clickableWithHold(stringResource(R.string.hold_message_actions), onHold = onHold, onClick = onClick)
+                else Modifier.clickable(onClick = onClick),
+            )
             .padding(vertical = DsSpacing.small),
         verticalAlignment = Alignment.Top,
     ) {

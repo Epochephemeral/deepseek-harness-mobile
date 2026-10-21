@@ -44,6 +44,7 @@ import com.labteto.dshmobile.ui.components.DsSegment
 import com.labteto.dshmobile.ui.components.DsSegmented
 import com.labteto.dshmobile.ui.components.EmptyHero
 import com.labteto.dshmobile.ui.components.FeatherIcons
+import com.labteto.dshmobile.ui.components.clickableWithHold
 import com.labteto.dshmobile.ui.theme.DsShapes
 import com.labteto.dshmobile.ui.theme.DsSpacing
 import com.labteto.dshmobile.ui.theme.DsType
@@ -60,7 +61,13 @@ internal fun <T> RpcResult<T>.requireValue(): T = when (this) {
 }
 
 @Composable
-internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: () -> Unit) {
+internal fun WorkspacePanels(
+    store: SessionStore,
+    state: PanelState,
+    onDismiss: () -> Unit,
+    /** Mentions a held file in the composer; null for a workspace with no composer to mention into. */
+    onMention: ((String, Boolean) -> Unit)? = null,
+) {
     val colors = DsTheme.colors
     val sessions by store.sessions.collectAsStateWithLifecycle()
     val cwd = sessions.firstOrNull { it.sessionId == state.key.sessionId }?.cwd
@@ -83,7 +90,7 @@ internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: 
                         }
                     }
                 }
-                WorkspacePanelBody(store, state, Modifier.fillMaxSize())
+                WorkspacePanelBody(store, state, Modifier.fillMaxSize(), onMention)
             }
         }
     }
@@ -94,10 +101,16 @@ internal fun WorkspacePanels(store: SessionStore, state: PanelState, onDismiss: 
  * [WorkspacePanels] draws around it.
  */
 @Composable
-internal fun WorkspacePanelBody(store: SessionStore, state: PanelState, modifier: Modifier = Modifier) {
+internal fun WorkspacePanelBody(
+    store: SessionStore,
+    state: PanelState,
+    modifier: Modifier = Modifier,
+    onMention: ((String, Boolean) -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val key = state.key
+    var heldEntry by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     val activeDocument = state.previews.getOrNull(state.selectedPreview)?.path
     fun listDirectory(path: String) {
         if (state.busy) return
@@ -237,12 +250,16 @@ internal fun WorkspacePanelBody(store: SessionStore, state: PanelState, modifier
                         ) {
                             items(entries, key = { it.name }) { entry ->
                                 val directory = entry.type == "directory"
+                                val path = if (state.directory == ".") entry.name else "${state.directory}/${entry.name}"
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
                                         .clip(DsShapes.row)
-                                        .clickable(enabled = !state.busy) {
-                                            val path = if (state.directory == ".") entry.name else "${state.directory}/${entry.name}"
+                                        .clickableWithHold(
+                                            holdLabel = stringResource(R.string.hold_file_actions),
+                                            onHold = { heldEntry = path to directory },
+                                            enabled = !state.busy,
+                                        ) {
                                             if (directory) listDirectory(path) else state.open(path)
                                         }
                                         .padding(horizontal = DsSpacing.small, vertical = DsSpacing.xsmall),
@@ -302,6 +319,9 @@ internal fun WorkspacePanelBody(store: SessionStore, state: PanelState, modifier
                     2 -> TerminalPanel(store, state, Modifier.weight(1f))
                 }
             }
+    }
+    heldEntry?.let { (path, folder) ->
+        FileHoldMenu(path = path, folder = folder, onMention = onMention, onDismiss = { heldEntry = null })
     }
 }
 

@@ -71,8 +71,8 @@ private fun singleResultText(result: ToolResultNode): String? {
     return only["text"]?.jsonPrimitive?.contentOrNull
 }
 
-/** Every text block joined, used to recover a capped search's full-result locator. */
-private fun flattenContent(result: ToolResultNode): String? {
+/** Every text block joined: a capped search's full-result locator, and what "Copy output" copies. */
+internal fun flattenContent(result: ToolResultNode): String? {
     val content = result.content as? JsonArray ?: return null
     val text = content
         .mapNotNull { it as? JsonObject }
