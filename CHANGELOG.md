@@ -3,6 +3,23 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased]
+
+### Changed
+
+- **The changed-files card starts folded.** A turn that touched a dozen files ended with a dozen
+  pills stacked over the reply, which is the part you were still reading. The card now shows only
+  the count, and a tap opens the list; the files are one tap away and holding one still offers
+  copy-path and mention. The fold is remembered per turn, so opening one turn's list does not open
+  the next.
+
+- **A turn's steps fold into one row under its prompt.** Collapsed, a step still costs a row, so a
+  turn that thinks, reads a few files, thinks again and then answers left a stack of headers between
+  the question and the reply. Everything the turn did before the message it settled on now sits
+  behind a single "Process · N steps" row: prompt, folded process, answer. Tapping it opens the
+  reasoning panels and tool groups as they were. Turns that have not answered yet — and the turn
+  currently running — are left expanded, because their steps are the progress you are watching.
+
 ## [0.18.0] - 2026-10-21
 
 Pressing and holding things in the app now opens a menu of what you can do with them. This

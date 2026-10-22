@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">ٹول کالز: %1$d</string>
     <string name="chat_tool_group_failed">%1$d ناکام</string>
     <string name="chat_thought_process">سوچنے کا عمل</string>
+    <string name="chat_process_title">کام کا عمل</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">یہ فون</string>
     <string name="connect_mode_loopback_hint">اسی فون پر چلنے والے harness سے بات کریں — Termux میں، یا adb reverse کے ذریعے یہاں فارورڈ کیا ہوا۔ کچھ بھی ڈیوائس سے باہر نہیں جاتا، اور harness ایپ کو مقامی سمجھتا ہے۔ پھر بھی یہ اس فون کو ایک بار سائن ان کرتا ہے۔</string>

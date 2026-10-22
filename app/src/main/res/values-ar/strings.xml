@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">استدعاءات الأدوات: %1$d</string>
     <string name="chat_tool_group_failed">%1$d فشلت</string>
     <string name="chat_thought_process">عملية التفكير</string>
+    <string name="chat_process_title">سير العمل</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">هذا الهاتف</string>
     <string name="connect_mode_loopback_hint">تواصل مع harness يعمل على هذا الهاتف نفسه — في Termux، أو مُعاد توجيهه إلى هنا عبر adb reverse. لا شيء يغادر الجهاز، ويعامل harness التطبيق كعميل محلي. ومع ذلك يسجّل دخول هذا الهاتف مرة واحدة.</string>

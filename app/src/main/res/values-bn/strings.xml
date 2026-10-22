@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">টুল কল: %1$d</string>
     <string name="chat_tool_group_failed">%1$d ব্যর্থ</string>
     <string name="chat_thought_process">চিন্তার প্রক্রিয়া</string>
+    <string name="chat_process_title">প্রক্রিয়া</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">এই ফোন</string>
     <string name="connect_mode_loopback_hint">এই ফোনেই চলমান harness-এর সাথে কথা বলুন — Termux-এ, বা adb reverse দিয়ে এখানে ফরওয়ার্ড করা। কিছুই ডিভাইসের বাইরে যায় না, আর harness অ্যাপটিকে লোকাল হিসেবে দেখে। তবুও এটি এই ফোনকে একবার সাইন ইন করায়।</string>
