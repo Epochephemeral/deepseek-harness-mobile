@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import com.labteto.dshmobile.R
 import com.labteto.dshmobile.core.session.AssistantMessageNode
 import com.labteto.dshmobile.core.session.ConversationSnapshot
+import com.labteto.dshmobile.core.session.TurnStartNode
 import com.labteto.dshmobile.core.session.UserMessageNode
 import com.labteto.dshmobile.ui.components.DsButton
 import com.labteto.dshmobile.ui.components.DsButtonSize
@@ -135,7 +136,14 @@ internal fun ChatTranscript(
     // Reversed here rather than at the call site: the fold's natural order is oldest-first, and
     // that is the order every other reader of `nodes` wants.
     val rows = remember(conversation?.nodes, context.running) {
-        groupToolRows(renderableChatNodes(conversation?.nodes.orEmpty(), context.running)).asReversed()
+        val nodes = conversation?.nodes.orEmpty()
+        foldProcessRows(
+            rows = groupToolRows(renderableChatNodes(nodes, context.running)),
+            // Read from the unfiltered nodes: a turn start draws no row, so the row list alone
+            // cannot say where one turn ends and the next begins.
+            turnStarts = nodes.filterIsInstance<TurnStartNode>().map { it.seq }.sorted(),
+            running = context.running,
+        ).asReversed()
     }
     val hasMore = conversation?.hasMore == true
     val itemCount = rows.size + if (hasMore) 1 else 0
@@ -373,6 +381,7 @@ internal fun ChatTranscript(
                         is TranscriptRow.Message -> ChatNodeItem(node = row.node, context = context)
                         is TranscriptRow.Tools -> ToolGroupRow(row.calls, context)
                         is TranscriptRow.Context -> ContextGroupRow(row.nodes, context)
+                        is TranscriptRow.Process -> ProcessRow(row, context)
                     }
                 }
             }

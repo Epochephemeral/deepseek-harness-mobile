@@ -574,6 +574,7 @@
     <string name="chat_tool_group_count">Tool calls: %1$d</string>
     <string name="chat_tool_group_failed">%1$d failed</string>
     <string name="chat_thought_process">Thought process</string>
+    <string name="chat_process_title">Process</string>
     <!-- ==== This phone (Termux) mode, harness control and install via Termux ==== -->
     <string name="connect_mode_loopback">This phone</string>
     <string name="connect_mode_loopback_hint">Talk to a harness running on this phone — in Termux, or forwarded here with adb reverse. Nothing leaves the device, and the harness treats the app as local. It still signs this phone in once.</string>
