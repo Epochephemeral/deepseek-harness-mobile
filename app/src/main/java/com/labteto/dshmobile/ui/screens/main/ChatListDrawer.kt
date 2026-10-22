@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -370,13 +371,13 @@ fun ChatListDrawer(
                     // the next workspace. The newest few say what you have been doing; the rest are
                     // one tap away. The session you are looking at is always kept, so opening the
                     // drawer mid-run never hides where you are.
-                    val showAll = showAllWorkspaces[workspace.workspaceId] == true
-                    val shownRoots = if (showAll) {
-                        roots
-                    } else {
-                        visibleWorkspaceRoots(roots, WORKSPACE_PREVIEW_LIMIT, openPath)
-                    }
-                    val heldBack = roots.size - shownRoots.size
+                    val preview = visibleWorkspaceRoots(roots, WORKSPACE_PREVIEW_LIMIT, openPath)
+                    // Only a preview that actually hides something gets the control. Six sessions
+                    // with the open one sixth preview as all six, and a "Show less" there would
+                    // fold nothing.
+                    val foldable = preview.size < roots.size
+                    val showAll = foldable && showAllWorkspaces[workspace.workspaceId] == true
+                    val shownRoots = if (showAll) roots else preview
                     val flat = shownRoots.flatMap { subtree(it) }
                     items(flat, key = { it.first.sessionId }) { (session, depth) ->
                         Box(Modifier.animateItem()) {
@@ -394,18 +395,18 @@ fun ChatListDrawer(
                             )
                         }
                     }
-                    if (showAll && roots.size > WORKSPACE_PREVIEW_LIMIT) {
+                    if (foldable) {
                         item(key = "ws-more-${workspace.workspaceId}") {
                             ShowAllRow(
-                                text = stringResource(R.string.chatlist_show_less),
-                                onClick = { showAllWorkspaces[workspace.workspaceId] = false },
-                            )
-                        }
-                    } else if (heldBack > 0) {
-                        item(key = "ws-more-${workspace.workspaceId}") {
-                            ShowAllRow(
-                                text = stringResource(R.string.chatlist_show_all, heldBack),
-                                onClick = { showAllWorkspaces[workspace.workspaceId] = true },
+                                // "Show all" counts the whole group, the same number the header
+                                // shows. The hidden count read as a total: twenty sessions said
+                                // "Show all 15".
+                                text = if (showAll) {
+                                    stringResource(R.string.chatlist_show_less)
+                                } else {
+                                    stringResource(R.string.chatlist_show_all, roots.size)
+                                },
+                                onClick = { showAllWorkspaces[workspace.workspaceId] = !showAll },
                             )
                         }
                     }
@@ -571,8 +572,8 @@ private fun SortChip(byRecency: Boolean, onPick: (byRecency: Boolean) -> Unit) {
  * The one-line control under a workspace's preview list.
  *
  * It is a row rather than a button in the header because it belongs to the list it shortens, and it
- * has to read differently in each state — "12 more" invites you to open, "Show less" has to be found
- * again after the list grew. Both are the same tap target in the same place, so nothing moves.
+ * has to read differently in each state — "Show all 20" invites you to open, "Show less" has to be
+ * found again after the list grew. Both are the same tap target in the same place, so nothing moves.
  */
 @Composable
 private fun ShowAllRow(text: String, onClick: () -> Unit) {
@@ -581,11 +582,12 @@ private fun ShowAllRow(text: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(DsShapes.row)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .heightIn(min = 36.dp)
-            // Sits under the session titles, not under the workspace header: the header's chevron
-            // and gap take 20dp, and the session row adds its own padding before the title.
-            .padding(start = DsSpacing.xxlarge, end = DsSpacing.small),
+            // Sits under the session titles, not under the workspace header. A top-level session
+            // row puts 54dp before its title: 8 padding, the 2dp rail, 8, the 16dp chevron slot, 4,
+            // the 8dp state dot, 8.
+            .padding(start = 54.dp, end = DsSpacing.small),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
