@@ -3,6 +3,16 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased]
+
+### Changed
+
+- **The changed-files card starts folded.** A turn that touched a dozen files ended with a dozen
+  pills stacked over the reply, which is the part you were still reading. The card now shows only
+  the count, and a tap opens the list; the files are one tap away and holding one still offers
+  copy-path and mention. The fold is remembered per turn, so opening one turn's list does not open
+  the next.
+
 ## [0.18.0] - 2026-10-21
 
 Pressing and holding things in the app now opens a menu of what you can do with them. This
