@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">เรียกเครื่องมือ: %1$d</string>
     <string name="chat_tool_group_failed">ล้มเหลว %1$d</string>
     <string name="chat_thought_process">กระบวนการคิด</string>
+    <string name="chat_process_title">ขั้นตอนการทำงาน</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">เครื่องนี้</string>
     <string name="connect_mode_loopback_hint">คุยกับ harness ที่รันอยู่บนโทรศัพท์เครื่องนี้ ไม่ว่าจะใน Termux หรือส่งต่อมาที่นี่ด้วย adb reverse ไม่มีอะไรออกจากเครื่อง และ harness ถือว่าแอปเป็นเครื่องเดียวกัน แต่ยังต้องลงชื่อเข้าใช้เครื่องนี้หนึ่งครั้ง</string>

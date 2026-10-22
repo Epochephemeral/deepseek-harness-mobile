@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">Herramientas: %1$d</string>
     <string name="chat_tool_group_failed">%1$d fallidas</string>
     <string name="chat_thought_process">Proceso de pensamiento</string>
+    <string name="chat_process_title">Proceso</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">Este teléfono</string>
     <string name="connect_mode_loopback_hint">Habla con un harness que se ejecuta en este teléfono: en Termux, o reenviado aquí con adb reverse. Nada sale del dispositivo y el harness trata la app como local. Aun así inicia sesión en este teléfono una vez.</string>

@@ -572,6 +572,7 @@
     <string name="chat_tool_group_count">Вызовы: %1$d</string>
     <string name="chat_tool_group_failed">Ошибок: %1$d</string>
     <string name="chat_thought_process">Ход рассуждений</string>
+    <string name="chat_process_title">Процесс</string>
     <!-- ==== This phone (Termux) ==== -->
     <string name="connect_mode_loopback">Этот телефон</string>
     <string name="connect_mode_loopback_hint">Работа с harness, запущенным на этом телефоне: в Termux или проброшенным сюда через adb reverse. Ничто не покидает устройство, и harness считает приложение локальным. Один раз он всё же выполнит вход для этого телефона.</string>
