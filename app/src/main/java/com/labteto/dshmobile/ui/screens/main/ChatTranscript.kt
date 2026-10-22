@@ -303,9 +303,15 @@ internal fun ChatTranscript(
     // The streaming row's key is shared by every reply in turn, so it cannot mark a place.
     val newestKey = rows.firstNotNullOfOrNull { row -> transcriptRowKey(row).takeIf { it != STREAMING_ROW_KEY } }
     LaunchedEffect(followTail, newestKey) { if (followTail) seenNewestKey = newestKey }
+    // A step the reader saw can fold into its turn's Process row when the turn answers, which is
+    // exactly while they are away; that row then stands in for it, or the count drops to nothing
+    // just as the reply lands.
     val unseen = remember(rows, seenNewestKey) {
         if (seenNewestKey == null) 0
-        else rows.indexOfFirst { transcriptRowKey(it) == seenNewestKey }.coerceAtLeast(0)
+        else rows.indexOfFirst { row ->
+            transcriptRowKey(row) == seenNewestKey ||
+                (row is TranscriptRow.Process && row.rows.any { transcriptRowKey(it) == seenNewestKey })
+        }.coerceAtLeast(0)
     }
     val awayFromTail by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 240 }

@@ -68,6 +68,20 @@ class ProcessFoldTest {
         assertEquals(6L, rows[3].seq)
     }
 
+    @Test fun `a steering message stays on screen and splits the fold`() {
+        // Steering lands inside the running turn: no turn start of its own.
+        val rows = fold(
+            listOf(user(2), reasoning(3), call(4), user(5, "use the other file"), reasoning(6), call(7), answer(8)),
+            turnStarts = listOf(1),
+        )
+        assertEquals(listOf(2L, 3L, 5L, 6L, 8L), rows.map { it.seq })
+        assertEquals(listOf(3L, 4L), (rows[1] as TranscriptRow.Process).rows.map { it.seq })
+        assertTrue((rows[2] as TranscriptRow.Message).node is UserMessageNode)
+        assertEquals(listOf(6L, 7L), (rows[3] as TranscriptRow.Process).rows.map { it.seq })
+        // The history sheet lists the steer as something the reader sent; its jump needs the row.
+        assertEquals(2, historyRowIndex(rows, 5L))
+    }
+
     @Test fun `the step count sums every tool call in the fold`() {
         val rows = fold(
             listOf(user(2), reasoning(3), call(4), call(5), answer(6)),

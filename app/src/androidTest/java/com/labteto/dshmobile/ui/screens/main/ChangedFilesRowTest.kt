@@ -48,8 +48,8 @@ class ChangedFilesRowTest {
         row()
 
         compose.onNodeWithText(summary).assertIsDisplayed()
-        compose.onNodeWithText("src/todos.js").assertDoesNotExist()
-        compose.onNodeWithText("test/pagination.test.js").assertDoesNotExist()
+        compose.onNodeWithText(technicalDisplay("src/todos.js")).assertDoesNotExist()
+        compose.onNodeWithText(technicalDisplay("test/pagination.test.js")).assertDoesNotExist()
     }
 
     @Test
@@ -57,10 +57,10 @@ class ChangedFilesRowTest {
         row()
 
         compose.onNodeWithText(summary).performClick()
-        compose.onNodeWithText("src/todos.js").assertIsDisplayed()
-        compose.onNodeWithText("test/pagination.test.js").assertIsDisplayed()
+        compose.onNodeWithText(technicalDisplay("src/todos.js")).assertIsDisplayed()
+        compose.onNodeWithText(technicalDisplay("test/pagination.test.js")).assertIsDisplayed()
 
         compose.onNodeWithText(summary).performClick()
-        compose.onNodeWithText("src/todos.js").assertDoesNotExist()
+        compose.onNodeWithText(technicalDisplay("src/todos.js")).assertDoesNotExist()
     }
 }

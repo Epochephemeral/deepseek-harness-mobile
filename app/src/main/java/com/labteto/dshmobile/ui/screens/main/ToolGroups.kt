@@ -140,8 +140,15 @@ private fun foldTurnProcess(rows: List<TranscriptRow>): List<TranscriptRow> {
     for (index in promptIndex + 1 until answerIndex) {
         val row = rows[index]
         // Injected context is its own disclosure with its own header. Burying it inside the fold
-        // would hide a control the reader may want on its own, and it never happens mid-work anyway.
-        if (row is TranscriptRow.Context) { flush(); folded += row } else run += row
+        // would hide a control the reader may want on its own.
+        //
+        // A user message is never a step either. Steering lands inside the running turn, not in a
+        // turn of its own, so a reader who corrected the agent halfway would find their own words
+        // folded away, and the history sheet's jump to them would land on nothing. The fold splits
+        // around it instead: what led up to the correction, the correction, what followed it.
+        val keep = row is TranscriptRow.Context ||
+            (row as? TranscriptRow.Message)?.node is UserMessageNode
+        if (keep) { flush(); folded += row } else run += row
     }
     flush()
     folded += rows.subList(answerIndex, rows.size)

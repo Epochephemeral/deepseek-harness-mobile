@@ -120,12 +120,15 @@ internal fun ChangedFilesRow(
         color = colors.bgLayer1,
         border = BorderStroke(1.dp, colors.borderL2),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column {
+            // The padding sits inside the clickable so the whole header takes the tap, not just the
+            // line of text in the middle of it.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 24.dp)
-                    .clickable(role = Role.Button) { expanded = !expanded },
+                    .heightIn(min = 40.dp)
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -157,7 +160,7 @@ internal fun ChangedFilesRow(
                 exit = shrinkVertically(DsAnimations.expand) + fadeOut(DsAnimations.fade),
             ) {
                 FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
