@@ -639,4 +639,6 @@
     <string name="hold_replace_draft_title">Replace your draft?</string>
     <string name="hold_replace_draft_body">The composer already has text in it. Editing this message replaces it.</string>
     <string name="hold_replace_draft_confirm">Replace</string>
+    <string name="chatlist_show_all">Show all %1$d</string>
+    <string name="chatlist_show_less">Show less</string>
 </resources>

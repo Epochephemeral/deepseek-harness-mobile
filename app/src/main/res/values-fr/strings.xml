@@ -637,4 +637,6 @@
     <string name="hold_replace_draft_title">Remplacer le brouillon ?</string>
     <string name="hold_replace_draft_body">La zone de saisie contient déjà du texte. Modifier ce message le remplace.</string>
     <string name="hold_replace_draft_confirm">Remplacer</string>
+    <string name="chatlist_show_all">Afficher tout %1$d</string>
+    <string name="chatlist_show_less">Afficher moins</string>
 </resources>

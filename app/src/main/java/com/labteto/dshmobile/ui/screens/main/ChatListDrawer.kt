@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,6 +94,15 @@ private const val SORT_MANUAL = "manual"
 private const val SORT_UPDATED = "updated"
 
 /**
+ * How many top-level sessions a workspace shows before it folds the rest behind "Show all".
+ *
+ * Five is what fits a phone drawer without scrolling past the next workspace, and it is enough to
+ * cover what most people touched today. It is a ceiling, not a rule: the session you are looking at
+ * is shown even when it sits further down.
+ */
+internal const val WORKSPACE_PREVIEW_LIMIT = 5
+
+/**
  * The chat history: workspaces, their sessions, and search.
  *
  * Two rules keep it readable. Blank sessions are hidden — the harness treats a session with no turn
@@ -129,6 +140,9 @@ fun ChatListDrawer(
     var newWorkspaceOpen by remember { mutableStateOf(false) }
     var newSessionOpen by remember { mutableStateOf(false) }
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
+    // Which workspaces you asked to see in full. Separate from `collapsed`: one says whether the
+    // group is open at all, the other whether the preview inside it has been widened.
+    val showAllWorkspaces = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(query) {
         delay(250)
@@ -353,7 +367,18 @@ fun ChatListDrawer(
                     )
                 }
                 if (!isCollapsed) {
-                    val flat = roots.flatMap { subtree(it) }
+                    // A group that opens to twenty rows is a wall you have to scroll past to reach
+                    // the next workspace. The newest few say what you have been doing; the rest are
+                    // one tap away. The session you are looking at is always kept, so opening the
+                    // drawer mid-run never hides where you are.
+                    val preview = visibleWorkspaceRoots(roots, WORKSPACE_PREVIEW_LIMIT, openPath)
+                    // Only a preview that actually hides something gets the control. Six sessions
+                    // with the open one sixth preview as all six, and a "Show less" there would
+                    // fold nothing.
+                    val foldable = preview.size < roots.size
+                    val showAll = foldable && showAllWorkspaces[workspace.workspaceId] == true
+                    val shownRoots = if (showAll) roots else preview
+                    val flat = shownRoots.flatMap { subtree(it) }
                     items(flat, key = { it.first.sessionId }) { (session, depth) ->
                         Box(Modifier.animateItem()) {
                             SessionRowItem(
@@ -367,6 +392,21 @@ fun ChatListDrawer(
                                 childrenExpanded = isExpanded(session.sessionId),
                                 onToggleChildren = { toggleChildren(session.sessionId) },
                                 pinned = pinnedIds?.let { session.sessionId in it },
+                            )
+                        }
+                    }
+                    if (foldable) {
+                        item(key = "ws-more-${workspace.workspaceId}") {
+                            ShowAllRow(
+                                // "Show all" counts the whole group, the same number the header
+                                // shows. The hidden count read as a total: twenty sessions said
+                                // "Show all 15".
+                                text = if (showAll) {
+                                    stringResource(R.string.chatlist_show_less)
+                                } else {
+                                    stringResource(R.string.chatlist_show_all, roots.size)
+                                },
+                                onClick = { showAllWorkspaces[workspace.workspaceId] = !showAll },
                             )
                         }
                     }
@@ -527,6 +567,38 @@ private fun SortChip(byRecency: Boolean, onPick: (byRecency: Boolean) -> Unit) {
 // ---------------------------------------------------------------------------
 // Rows
 // ---------------------------------------------------------------------------
+
+/**
+ * The one-line control under a workspace's preview list.
+ *
+ * It is a row rather than a button in the header because it belongs to the list it shortens, and it
+ * has to read differently in each state — "Show all 20" invites you to open, "Show less" has to be
+ * found again after the list grew. Both are the same tap target in the same place, so nothing moves.
+ */
+@Composable
+private fun ShowAllRow(text: String, onClick: () -> Unit) {
+    val colors = DsTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(DsShapes.row)
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = 36.dp)
+            // Sits under the session titles, not under the workspace header. A top-level session
+            // row puts 54dp before its title: 8 padding, the 2dp rail, 8, the 16dp chevron slot, 4,
+            // the 8dp state dot, 8.
+            .padding(start = 54.dp, end = DsSpacing.small),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = DsType.small13Strong,
+            color = colors.labelSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 /**
  * A workspace header that collapses its group and carries the workspace verbs.
@@ -1021,6 +1093,31 @@ internal fun indexSubagents(
 /** Display title: an explicit title, else the working directory's folder, else the id. */
 internal fun displaySessionTitle(session: SessionRow): String =
     sessionTitle(session).let { if (session.title.isNullOrBlank()) technicalDisplay(it) else it }
+
+/**
+ * The slice of a workspace's sessions to draw while it is in preview mode.
+ *
+ * Cut from the head, because that is the order the drawer already sorted into — whichever order you
+ * chose, the first entries are the ones you meant to see. Any session on [openPath] is then put back
+ * if the cut removed it: hiding the chat you are reading, inside the group that holds it, is the one
+ * outcome that makes the drawer lie about where you are. The restored row keeps its original
+ * position, so the list stays in the order it claims.
+ *
+ * Order is preserved exactly as passed in — this function sorts nothing, so the caller's preference
+ * (manual order or recency) survives untouched.
+ */
+internal fun visibleWorkspaceRoots(
+    roots: List<SessionRow>,
+    limit: Int,
+    openPath: Set<String>,
+): List<SessionRow> {
+    if (limit <= 0 || roots.size <= limit) return roots
+    // Indices rather than rows, so a restored session keeps its own place in the order instead of
+    // being appended at the bottom, where it would read as the oldest thing you did.
+    val keep = roots.indices.take(limit).toMutableSet()
+    roots.forEachIndexed { index, row -> if (row.sessionId in openPath) keep += index }
+    return roots.filterIndexed { index, _ -> index in keep }
+}
 
 internal fun sessionTitle(session: SessionRow): String {
     val title = session.title?.takeIf { it.isNotBlank() }

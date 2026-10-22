@@ -637,4 +637,6 @@
     <string name="hold_replace_draft_title">استبدال المسودة؟</string>
     <string name="hold_replace_draft_body">يحتوي مربع الكتابة على نص بالفعل. تعديل هذه الرسالة سيستبدله.</string>
     <string name="hold_replace_draft_confirm">استبدال</string>
+    <string name="chatlist_show_all">عرض الكل %1$d</string>
+    <string name="chatlist_show_less">عرض أقل</string>
 </resources>

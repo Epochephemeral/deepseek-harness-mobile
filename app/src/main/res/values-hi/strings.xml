@@ -637,4 +637,6 @@
     <string name="hold_replace_draft_title">ड्राफ़्ट बदलें?</string>
     <string name="hold_replace_draft_body">कंपोज़र में पहले से टेक्स्ट है। इस संदेश को संपादित करने से वह बदल जाएगा।</string>
     <string name="hold_replace_draft_confirm">बदलें</string>
+    <string name="chatlist_show_all">सभी %1$d दिखाएँ</string>
+    <string name="chatlist_show_less">कम दिखाएँ</string>
 </resources>
