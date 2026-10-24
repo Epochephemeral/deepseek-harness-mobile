@@ -641,4 +641,14 @@
     <string name="hold_replace_draft_confirm">Replace</string>
     <string name="chatlist_show_all">Show all %1$d</string>
     <string name="chatlist_show_less">Show less</string>
+    <string name="settings_history_cache">Conversation cache</string>
+    <string name="settings_history_cache_usage">Used: %1$s</string>
+    <string name="settings_history_cache_description">Keeps recent history for faster reopening. When full, removes the least recently used cached history. Clearing keeps your sign-in and the conversations on your computer.</string>
+    <string name="settings_history_cache_clear">Clear conversation cache</string>
+    <string name="settings_history_cache_clearing">Clearing…</string>
+    <string name="settings_history_cache_cleared">Conversation cache cleared</string>
+    <string name="settings_history_cache_failed">Cache operation failed. Please try again.</string>
+    <string name="history_cache_syncing">Showing saved history · Syncing…</string>
+    <string name="history_cache_stale">Showing saved history · Not synced</string>
+    <string name="settings_history_cache_limit">Cache limit</string>
 </resources>

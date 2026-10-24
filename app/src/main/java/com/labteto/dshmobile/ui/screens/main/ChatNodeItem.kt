@@ -102,6 +102,7 @@ internal data class ChatNodeContext(
     val onOpenSubagent: (String) -> Unit,
     val onBranchFrom: (Long) -> Unit,
     val onFeedback: (Long, Boolean) -> Unit,
+    val historyReady: Boolean = true,
     val eventTimes: Map<Long, Long> = emptyMap(),
     /** Puts a sent prompt's text back in the composer; null where there is no composer. */
     val onEditPrompt: ((String) -> Unit)? = null,
@@ -450,14 +451,16 @@ private fun MessageActionsRow(node: AssistantMessageNode, context: ChatNodeConte
         ActionIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy_message)) {
             copy(node.plainText)
         }
-        ActionIcon(Icons.AutoMirrored.Outlined.CallSplit, stringResource(R.string.chat_branch_message)) {
-            context.onBranchFrom(node.seq)
-        }
-        ActionIcon(Icons.Filled.ThumbUp, stringResource(R.string.chat_feedback_up)) {
-            context.onFeedback(node.seq, true)
-        }
-        ActionIcon(Icons.Filled.ThumbDown, stringResource(R.string.chat_feedback_down)) {
-            context.onFeedback(node.seq, false)
+        if (context.historyReady) {
+            ActionIcon(Icons.AutoMirrored.Outlined.CallSplit, stringResource(R.string.chat_branch_message)) {
+                context.onBranchFrom(node.seq)
+            }
+            ActionIcon(Icons.Filled.ThumbUp, stringResource(R.string.chat_feedback_up)) {
+                context.onFeedback(node.seq, true)
+            }
+            ActionIcon(Icons.Filled.ThumbDown, stringResource(R.string.chat_feedback_down)) {
+                context.onFeedback(node.seq, false)
+            }
         }
     }
 }

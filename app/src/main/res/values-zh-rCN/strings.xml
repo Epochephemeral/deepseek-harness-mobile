@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">替换</string>
     <string name="chatlist_show_all">显示全部 %1$d</string>
     <string name="chatlist_show_less">收起</string>
+    <string name="settings_history_cache">会话缓存</string>
+    <string name="settings_history_cache_usage">已占用：%1$s</string>
+    <string name="settings_history_cache_description">保存近期历史，加快再次打开。空间用满时，按最近最少使用（LRU）自动淘汰。清理不影响登录和电脑上的会话。</string>
+    <string name="settings_history_cache_clear">清理会话缓存</string>
+    <string name="settings_history_cache_clearing">正在清理…</string>
+    <string name="settings_history_cache_cleared">会话缓存已清理</string>
+    <string name="settings_history_cache_failed">缓存操作失败，请重试</string>
+    <string name="history_cache_syncing">正在显示缓存 · 同步中…</string>
+    <string name="history_cache_stale">正在显示缓存 · 尚未同步</string>
+    <string name="settings_history_cache_limit">缓存容量上限</string>
 </resources>

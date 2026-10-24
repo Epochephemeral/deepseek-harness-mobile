@@ -1,5 +1,8 @@
 package com.labteto.dshmobile.data
 
+import com.labteto.dshmobile.core.wire.INITIAL_FOLLOW_MESSAGES
+import com.labteto.dshmobile.core.wire.hydrateSessionSnapshot
+
 import com.labteto.dshmobile.core.wire.automationCatalog
 import com.labteto.dshmobile.core.wire.pluginBundles
 
@@ -46,6 +49,7 @@ import com.labteto.dshmobile.core.wire.dto.PromptContentPart
 import com.labteto.dshmobile.core.wire.dto.QUESTION_CANCELLED
 import com.labteto.dshmobile.core.wire.dto.QueueAction
 import com.labteto.dshmobile.core.wire.dto.ModelSelectionProjection
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.combine
 import com.labteto.dshmobile.core.wire.dto.ModelCatalog
 import com.labteto.dshmobile.core.wire.dto.InboxProjection
@@ -317,6 +321,7 @@ class SessionStore @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
     private val connectionManager: ConnectionManager,
     private val hostsStore: HostsStore,
+    private val historyCache: HistoryCache,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
@@ -572,6 +577,10 @@ class SessionStore @Inject constructor(
 
     // Open-session fold state.
     private var currentId: String? = null
+    private var historyHost: String? = null
+    private var historyOpenEpoch = 0L
+    private var historyCacheTicket = 0L
+    private var historySaveJob: Job? = null
     private val currentEvents = ArrayList<SessionEventEnvelope>()
     private var currentHasMore = false
     private var currentBlank = true
@@ -616,6 +625,11 @@ class SessionStore @Inject constructor(
     private data class ProjectionValue(val seq: Int, val value: JsonElement)
 
     init {
+        scope.launch {
+            hostsStore.settings.map { it.historyCacheLimitBytes }.distinctUntilChanged().collect {
+                runCatching { historyCache.setLimitBytes(it) }
+            }
+        }
         scope.launch {
             questionSessions.cards.collect { cards ->
                 val kinds = cards.pendingQuestionKinds()
@@ -1382,7 +1396,27 @@ class SessionStore @Inject constructor(
                 currentEvents.sortBy { it.seq }
             }
         }
+        scheduleHistorySaveLocked()
         rebuildTicks.trySend(Unit)
+    }
+
+    private fun saveHistoryLocked() {
+        if (followCursor == null || historyHost != activeHostKey) return
+        val host = historyHost ?: return
+        val sid = currentId ?: return
+        val ticket = historyCacheTicket
+        val events = trimToUserPrompt(historyTail(currentEvents.toList()))
+        scope.launch {
+            runCatching { historyCache.write(host, sid, ticket, events) }
+        }
+    }
+
+    private fun scheduleHistorySaveLocked() {
+        historySaveJob?.cancel()
+        historySaveJob = scope.launch {
+            delay(350)
+            synchronized(lock) { saveHistoryLocked() }
+        }
     }
 
     private fun mergeProjectionLocked(key: String, seq: Int, value: JsonElement) {
@@ -1397,6 +1431,9 @@ class SessionStore @Inject constructor(
     }
 
     private fun rebuildCurrentLocked() {
+        // The preview is presentation only. Host control updates must not replace it with an
+        // empty fold or mix cached events into a new follow generation.
+        if (followCursor == null) return
         val sid = currentId ?: return
         val events = currentEvents.toList()
         val snapshot = EventFold(sid).fold(events, liveAssistant.transientEnvelopes())
@@ -1527,9 +1564,17 @@ class SessionStore @Inject constructor(
 
     suspend fun openSession(sessionId: String) = withContext(Dispatchers.Default) {
         val api = apiOrNull() ?: return@withContext
+        val host = activeHostKey ?: return@withContext
         _loadOlderFailed.value = false
         synchronized(lock) {
-            val same = currentId == sessionId
+            saveHistoryLocked()
+            historySaveJob?.cancel()
+            followJob?.cancel()
+            val same = currentId == sessionId && historyHost == host
+            historyOpenEpoch++
+            historyHost = host
+            historyCacheTicket = historyCache.ticket()
+            followCursor = null
             currentId = sessionId
             _currentSessionId.value = sessionId
             currentEvents.clear()
@@ -1538,8 +1583,8 @@ class SessionStore @Inject constructor(
             currentProjections.clear()
             currentQueue = emptyList()
             liveAssistant.clear()
+            _currentConversation.value = null
             if (!same) {
-                _currentConversation.value = null
                 _jobs.value = emptyList()
                 _skills.value = emptyList()
                 _models.value = null
@@ -1549,9 +1594,9 @@ class SessionStore @Inject constructor(
                 _commands.value = emptyList()
                 _pendingPermission.value = null
             }
+            startFollow(sessionId)
+            startJobs(sessionId)
         }
-        startFollow(sessionId)
-        startJobs(sessionId)
         // Everything past the follow stream furnishes the chrome around the transcript — the skill
         // and model pickers, the subagent list, the command catalog — and none of it is needed to
         // paint a single message. Run in series they stacked four round trips onto every session
@@ -1572,11 +1617,10 @@ class SessionStore @Inject constructor(
     /**
      * Open the live journal for one session, replacing whatever was open.
      *
-     * There is no separate history read any more. `session/follow` opens with a complete snapshot
-     * carrying the first page, its projections, and the log cut the generation opened at; every
-     * later item is one live event. A reconnect re-opens the stream and sends another complete
-     * snapshot, so the window is replaced wholesale rather than patched — which is why the
-     * snapshot handler clears the buffer instead of merging into it.
+     * `session/follow` opens with a small tail, projections, and the generation's log cut. The
+     * full first page is then read over compression-capable HTTP at that same cut, before any
+     * queued live frames are applied. Reconnects repeat this sequence, replacing the window
+     * wholesale rather than merging events from different generations.
      *
      * The stream is opened with `assistantStream`, because since harness 0.1.3 that is the only
      * way to see a reply while it is written: the durable log holds one settlement per model
@@ -1590,6 +1634,20 @@ class SessionStore @Inject constructor(
     private fun startFollow(sessionId: String) {
         followJob?.cancel()
         followCursor = null
+        val host = historyHost ?: return
+        val epoch = historyOpenEpoch
+        val ticket = historyCacheTicket
+        fun isCurrent() = historyOpenEpoch == epoch && currentId == sessionId && activeHostKey == host
+        scope.launch {
+            val cached = historyCache.read(host, sessionId, ticket) ?: return@launch
+            val preview = runCatching { historyPreview(sessionId, cached) }.getOrNull() ?: return@launch
+            synchronized(lock) {
+                if (isCurrent() && followCursor == null && ticket == historyCache.ticket()) {
+                    _currentConversation.value = preview
+                }
+            }
+        }
+        val api = connectionManager.connectedApi ?: return
         val mux = connectionManager.generation?.mux
         if (mux == null) {
             log("cannot follow $sessionId: no connection generation")
@@ -1602,7 +1660,7 @@ class SessionStore @Inject constructor(
                     SessionFollowRequest.serializer(),
                     SessionFollowRequest(
                         address = SessionAddress.Session(sessionId = sessionId),
-                        maxMessages = HISTORY_PAGE_SIZE,
+                        maxMessages = INITIAL_FOLLOW_MESSAGES,
                         assistantStream = true,
                     ),
                 ),
@@ -1612,16 +1670,28 @@ class SessionStore @Inject constructor(
             runCatching {
                 mux.openStream("session/follow", args).collect { item ->
                     when (val frame = decodeOrNull(SessionFollowFrameSerializer, item)) {
-                        is SessionFollowFrame.Snapshot -> applyFollowSnapshot(sessionId, frame)
-                        is SessionFollowFrame.Entry -> applyFollowEntry(sessionId, frame.record)
-                        is SessionFollowFrame.AssistantStream -> applyAssistantFrame(sessionId, frame)
+                        is SessionFollowFrame.Snapshot -> {
+                            val hydrated = hydrateSessionSnapshot(SessionAddress.Session(sessionId = sessionId), frame,
+                                HISTORY_PAGE_SIZE, api::sessionPage)
+                            synchronized(lock) {
+                                if (isCurrent()) applyFollowSnapshot(sessionId, hydrated)
+                            }
+                        }
+                        is SessionFollowFrame.Entry -> synchronized(lock) {
+                            if (isCurrent()) applyFollowEntry(sessionId, frame.record)
+                        }
+                        is SessionFollowFrame.AssistantStream -> synchronized(lock) {
+                            if (isCurrent()) applyAssistantFrame(sessionId, frame)
+                        }
                         null -> log("undecodable session/follow frame")
                     }
                 }
             }.onFailure { failure ->
                 if (failure is kotlinx.coroutines.CancellationException) throw failure
                 log("session/follow ended for $sessionId", failure)
-                setConnectionError(failure.message)
+                synchronized(lock) {
+                    if (isCurrent()) setConnectionError(failure.message)
+                }
             }
         }
     }
@@ -1706,6 +1776,7 @@ class SessionStore @Inject constructor(
             // the settlement.
             liveAssistant.seed(frame.assistantStream)
             rebuildCurrentLocked()
+            saveHistoryLocked()
         }
     }
 
@@ -2305,7 +2376,7 @@ class SessionStore @Inject constructor(
         val mux = muxForHost(host) ?: return
         val request = SessionFollowRequest(
             address = SessionAddress.Subagent(parentSessionId = sid, childSessionId = childSessionId, mode = mode),
-            maxMessages = HISTORY_PAGE_SIZE, assistantStream = true,
+            maxMessages = INITIAL_FOLLOW_MESSAGES, assistantStream = true,
         )
         childFollowJob = scope.launch {
             val events = mutableListOf<SessionEventEnvelope>()
@@ -2318,10 +2389,11 @@ class SessionStore @Inject constructor(
                     if (activeHostKey != host || currentSessionId.value != sid) return@collect
                     when (val frame = decodeOrNull(SessionFollowFrameSerializer, item)) {
                         is SessionFollowFrame.Snapshot -> {
+                            val snapshot = hydrateSessionSnapshot(request.address, frame, HISTORY_PAGE_SIZE, api::sessionPage)
                             events.clear()
-                            events.addAll(expandRecords(frame.records))
-                            live.seed(frame.assistantStream)
-                            hasMore = frame.hasMore
+                            events.addAll(expandRecords(snapshot.records))
+                            live.seed(snapshot.assistantStream)
+                            hasMore = snapshot.hasMore
                         }
                         is SessionFollowFrame.Entry -> expandRecords(listOf(frame.record)).forEach { event ->
                             if (events.none { it.seq == event.seq }) events.add(event)

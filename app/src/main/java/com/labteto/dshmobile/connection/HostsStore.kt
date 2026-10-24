@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.labteto.dshmobile.DshApplication
@@ -28,6 +29,7 @@ class HostsStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private object Keys {
+        val HISTORY_CACHE_LIMIT = longPreferencesKey("history_cache_limit_bytes")
         val HOSTS = stringPreferencesKey("hosts_json")
         val AUTO_LAST = booleanPreferencesKey("auto_last")
         val AUTO_LAN = booleanPreferencesKey("auto_lan")
@@ -80,6 +82,8 @@ class HostsStore @Inject constructor(
             knownPorts = ports,
             updateCheckEnabled = prefs[Keys.UPDATE_CHECK] ?: true,
             dismissedUpdate = prefs[Keys.DISMISSED_UPDATE],
+            historyCacheLimitBytes = prefs[Keys.HISTORY_CACHE_LIMIT]?.takeIf { it > 0 }
+                ?: DEFAULT_HISTORY_CACHE_LIMIT_BYTES,
         )
     }
 
@@ -217,6 +221,7 @@ class HostsStore @Inject constructor(
         // activity exists, and DataStore cannot be read from there. See DshApplication.
         DshApplication.storeThemePreference(context, next.themePreference)
         dataStore.edit { prefs ->
+            prefs[Keys.HISTORY_CACHE_LIMIT] = next.historyCacheLimitBytes
             prefs[Keys.AUTO_LAST] = next.autoConnectLast
             prefs[Keys.AUTO_LAN] = next.autoConnectLan
             prefs[Keys.AUTO_LOOPBACK] = next.autoConnectLoopback

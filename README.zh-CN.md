@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="https://dshm.zyphite.com"><img alt="Website" src="https://img.shields.io/badge/website-dshm.zyphite.com-4176E6?style=flat-square"></a>
-  <a href="https://github.com/sorsama/deepseek-harness-mobile/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sorsama/deepseek-harness-mobile?style=flat-square"></a>
-  <a href="https://github.com/sorsama/deepseek-harness-mobile/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sorsama/deepseek-harness-mobile/ci.yml?branch=main&style=flat-square"></a>
+  <a href="https://github.com/sorsama/deepseek-harness-mobile/releases/latest"><img alt="Upstream release" src="https://img.shields.io/github/v/release/sorsama/deepseek-harness-mobile?style=flat-square"></a>
+  <a href="https://github.com/Epochephemeral/deepseek-harness-mobile/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Epochephemeral/deepseek-harness-mobile/ci.yml?branch=main&style=flat-square"></a>
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
 </p>
@@ -24,6 +24,25 @@
   <a href="README.fr.md">Français</a> ·
   <a href="README.th.md">ไทย</a>
 </p>
+
+## 个人 Fork
+
+本仓库是 [Epochephemeral/deepseek-harness-mobile](https://github.com/Epochephemeral/deepseek-harness-mobile)，
+fork 自 [sorsama/deepseek-harness-mobile](https://github.com/sorsama/deepseek-harness-mobile)，
+保留原始提交历史、贡献者署名和 [MIT 许可证](LICENSE)。本版基于上游提交
+[`93a7910`](https://github.com/sorsama/deepseek-harness-mobile/commit/93a7910) 开发。
+
+这版主要优化慢速连接下打开会话的体验：
+
+- 通过压缩 HTTP 读取首屏历史，保持实时消息的顺序。
+- 再次打开会话先展示本地缓存，随后同步电脑上的最新内容。
+- 在 **设置 → 数据 → 会话缓存** 查看占用、主动清理、调整容量；默认 **2 GB**，
+  空间用满时按 **LRU** 淘汰最久未访问的缓存。
+
+使用 JDK 17 和 Android SDK 35，执行 `./gradlew :app:assembleDebug` 构建本版。
+APK 位于 `app/build/outputs/apk/debug/app-debug.apk`，安装名称为 **DSH Mobile Local**，
+包名 `com.labteto.dshmobile.debug`，版本后缀 `-local`。
+实现和验证方式见[历史加载说明](docs/history-loading.md)。发布徽章链接到上游版本，以下为两者共用的应用说明。
 
 DeepSeek Harness 是一个运行在你电脑上的 AI 编程代理，自带网页界面。DSH Mobile 连接到这个 harness，把同样的操作搬进原生 Android 应用。你可以在电脑前开始一个任务，然后在手机上跟进进度、回答它的提问、批准它要执行的命令。
 

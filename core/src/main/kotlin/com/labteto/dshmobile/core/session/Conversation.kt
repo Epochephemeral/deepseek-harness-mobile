@@ -165,6 +165,8 @@ data class ConversationSnapshot(
     val hasMore: Boolean = false,
     val lastSeq: Long = -1,
     val gap: Boolean = false,
+    /** Local presentation metadata; a cached preview carries no live-state authority. */
+    val fromCache: Boolean = false,
 ) {
     val turns: Int get() = nodes.count { it is TurnStartNode }
 }

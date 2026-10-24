@@ -99,6 +99,7 @@ fun ChatScreen(
 
     val conversation by store.currentConversation.collectAsStateWithLifecycle()
     val currentSessionId by store.currentSessionId.collectAsStateWithLifecycle()
+    val historySyncing = currentSessionId != null && (conversation == null || conversation?.fromCache == true)
     val sessions by store.sessions.collectAsStateWithLifecycle()
     val models by store.models.collectAsStateWithLifecycle()
     val skills by store.skills.collectAsStateWithLifecycle()
@@ -497,6 +498,14 @@ fun ChatScreen(
                 historyEnabled = currentSessionId != null,
             )
 
+            if (conversation?.fromCache == true) {
+                androidx.compose.material3.Text(
+                    stringResource(if (connectionError == null) R.string.history_cache_syncing else R.string.history_cache_stale),
+                    style = com.labteto.dshmobile.ui.theme.DsType.small13,
+                    color = colors.labelSecondary,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
             AnimatedPresence(connectionError) {
                 ConnectionBanner(
                     message = it,
@@ -504,12 +513,13 @@ fun ChatScreen(
                     onAction = { store.retryConnection() },
                 )
             }
-            AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null }) {
+            AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null && !historySyncing }) {
                 ConnectionBanner(stringResource(R.string.common_reconnecting), warning = true)
             }
 
             val nodeContext = ChatNodeContext(
                 nodes = conversation?.nodes ?: emptyList(),
+                historyReady = !historySyncing,
                 eventTimes = eventTimes,
                 running = conversation?.running == true,
                 cwd = workingDirectory,
@@ -517,9 +527,9 @@ fun ChatScreen(
                     scope.launch { store.openSubagentTranscript(childId) }
                     sheet = ChatSheet.Subagents
                 },
-                onBranchFrom = { seq -> scope.launch { currentSessionId?.let { store.forkSession(it, seq) } } },
+                onBranchFrom = { seq -> if (!historySyncing) scope.launch { currentSessionId?.let { store.forkSession(it, seq) } } },
                 onFeedback = { seq, positive ->
-                    conversation?.nodes?.filterIsInstance<com.labteto.dshmobile.core.session.AssistantMessageNode>()
+                    if (!historySyncing) conversation?.nodes?.filterIsInstance<com.labteto.dshmobile.core.session.AssistantMessageNode>()
                         ?.firstOrNull { it.seq == seq }?.messageId?.let { feedback = Triple(composer.key, it, positive) }
                 },
                 // Lambdas rather than references, for the reason given at the composer's `onSend`:
@@ -528,7 +538,7 @@ fun ChatScreen(
                 // The rewind plugin's own picker refuses nothing while a turn runs, but withdrawing
                 // the message a running turn is answering is not something to offer from a hold.
                 onRewindTo = if (
-                    currentSessionId != null && conversation?.running != true &&
+                    currentSessionId != null && !historySyncing && conversation?.running != true &&
                     commandsAvailable && RewindDecoration.recognizes(commands)
                 ) {
                     { seq, preview -> rewindFrom = seq to preview }

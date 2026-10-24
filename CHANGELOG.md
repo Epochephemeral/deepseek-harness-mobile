@@ -3,6 +3,22 @@
 All notable changes to DSH Mobile are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); the project uses SemVer.
 
+## [Unreleased — personal fork]
+
+Based on [sorsama/deepseek-harness-mobile](https://github.com/sorsama/deepseek-harness-mobile)
+at `93a7910`.
+
+### Added
+
+- Cached conversation previews with background synchronization and a persistent source marker.
+- Settings for cache usage, manual clearing and capacity (2 GB by default), with LRU eviction.
+- Cache, bootstrap and opt-in Android network/UI tests.
+- A separately installable **DSH Mobile Local** debug build.
+
+### Changed
+
+- Initial history and subagent history use compressed HTTP reads at the live stream’s opening cursor.
+
 ## [Unreleased]
 
 ### Added

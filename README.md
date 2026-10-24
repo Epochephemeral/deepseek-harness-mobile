@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="https://dshm.zyphite.com"><img alt="Website" src="https://img.shields.io/badge/website-dshm.zyphite.com-4176E6?style=flat-square"></a>
-  <a href="https://github.com/sorsama/deepseek-harness-mobile/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sorsama/deepseek-harness-mobile?style=flat-square"></a>
-  <a href="https://github.com/sorsama/deepseek-harness-mobile/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sorsama/deepseek-harness-mobile/ci.yml?branch=main&style=flat-square"></a>
+  <a href="https://github.com/sorsama/deepseek-harness-mobile/releases/latest"><img alt="Upstream release" src="https://img.shields.io/github/v/release/sorsama/deepseek-harness-mobile?style=flat-square"></a>
+  <a href="https://github.com/Epochephemeral/deepseek-harness-mobile/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Epochephemeral/deepseek-harness-mobile/ci.yml?branch=main&style=flat-square"></a>
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
 </p>
@@ -24,6 +24,27 @@
   <a href="README.fr.md">Français</a> ·
   <a href="README.th.md">ไทย</a>
 </p>
+
+## Personal fork
+
+This repository is [Epochephemeral/deepseek-harness-mobile](https://github.com/Epochephemeral/deepseek-harness-mobile),
+a fork of [sorsama/deepseek-harness-mobile](https://github.com/sorsama/deepseek-harness-mobile).
+It retains the upstream commit history, contributor credits and [MIT license](LICENSE).
+The changes build on upstream commit [`93a7910`](https://github.com/sorsama/deepseek-harness-mobile/commit/93a7910).
+
+This fork focuses on opening conversations over slower connections:
+
+- Read the initial history through compressed HTTP while preserving the live stream’s ordering.
+- Show cached history immediately when reopening a conversation, then synchronize with the host.
+- Manage the cache under **Settings → Data → Conversation cache**: inspect usage, clear it,
+  and choose a capacity. The default is **2 GB**; LRU eviction removes the least recently
+  accessed history when the capacity is reached.
+
+Build this fork with `./gradlew :app:assembleDebug` using JDK 17 and Android SDK 35.
+The APK is `app/build/outputs/apk/debug/app-debug.apk`, installed as **DSH Mobile Local**
+(`com.labteto.dshmobile.debug`, version suffix `-local`). See
+[history loading and verification](docs/history-loading.md) for implementation details and tests.
+The release badge links to upstream releases. The documentation below describes the shared app.
 
 The DeepSeek Harness is an AI coding agent that runs on your computer and has a web interface.
 DSH Mobile connects to that harness and gives you the same controls in a native Android app. You can

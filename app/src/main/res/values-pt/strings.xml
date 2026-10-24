@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">Substituir</string>
     <string name="chatlist_show_all">Mostrar todos %1$d</string>
     <string name="chatlist_show_less">Mostrar menos</string>
+    <string name="settings_history_cache">Cache de conversas</string>
+    <string name="settings_history_cache_usage">Em uso: %1$s</string>
+    <string name="settings_history_cache_description">Guarda o histórico recente para abrir mais rápido. Quando cheio, remove o histórico usado há mais tempo. Limpar mantém o acesso à conta e as conversas no computador.</string>
+    <string name="settings_history_cache_clear">Limpar cache de conversas</string>
+    <string name="settings_history_cache_clearing">Limpando…</string>
+    <string name="settings_history_cache_cleared">Cache de conversas limpo</string>
+    <string name="settings_history_cache_failed">A operação do cache falhou. Tente novamente.</string>
+    <string name="history_cache_syncing">Exibindo histórico salvo · Sincronizando…</string>
+    <string name="history_cache_stale">Exibindo histórico salvo · Não sincronizado</string>
+    <string name="settings_history_cache_limit">Limite do cache</string>
 </resources>

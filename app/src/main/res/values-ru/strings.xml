@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">Заменить</string>
     <string name="chatlist_show_all">Показать все %1$d</string>
     <string name="chatlist_show_less">Показать меньше</string>
+    <string name="settings_history_cache">Кэш переписок</string>
+    <string name="settings_history_cache_usage">Занято: %1$s</string>
+    <string name="settings_history_cache_description">Сохраняет недавнюю историю для быстрого открытия. При заполнении удаляет историю, к которой дольше всего не обращались. Очистка сохраняет вход в аккаунт и переписки на компьютере.</string>
+    <string name="settings_history_cache_clear">Очистить кэш переписок</string>
+    <string name="settings_history_cache_clearing">Очистка…</string>
+    <string name="settings_history_cache_cleared">Кэш переписок очищен</string>
+    <string name="settings_history_cache_failed">Не удалось выполнить операцию с кэшем. Повторите попытку.</string>
+    <string name="history_cache_syncing">Сохранённая история · Синхронизация…</string>
+    <string name="history_cache_stale">Сохранённая история · Не синхронизировано</string>
+    <string name="settings_history_cache_limit">Лимит кэша</string>
 </resources>

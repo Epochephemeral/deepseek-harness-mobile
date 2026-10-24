@@ -24,6 +24,11 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideHistoryCache(@ApplicationContext context: Context) =
+        com.labteto.dshmobile.data.HistoryCache(java.io.File(context.cacheDir, "session-history"))
+
+    @Provides
+    @Singleton
     fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> = context.appDataStore
 
     @Provides

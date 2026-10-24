@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">استبدال</string>
     <string name="chatlist_show_all">عرض الكل %1$d</string>
     <string name="chatlist_show_less">عرض أقل</string>
+    <string name="settings_history_cache">ذاكرة المحادثات المؤقتة</string>
+    <string name="settings_history_cache_usage">المستخدم: %1$s</string>
+    <string name="settings_history_cache_description">تحفظ السجل الحديث لفتحه أسرع. عند الامتلاء تحذف السجل الأقل استخدامًا مؤخرًا. لا يمسح التنظيف تسجيل الدخول أو محادثات الكمبيوتر.</string>
+    <string name="settings_history_cache_clear">مسح ذاكرة المحادثات</string>
+    <string name="settings_history_cache_clearing">جارٍ المسح…</string>
+    <string name="settings_history_cache_cleared">تم مسح ذاكرة المحادثات</string>
+    <string name="settings_history_cache_failed">فشلت عملية الذاكرة المؤقتة. حاول مرة أخرى.</string>
+    <string name="history_cache_syncing">عرض السجل المحفوظ · جارٍ التزامن…</string>
+    <string name="history_cache_stale">عرض السجل المحفوظ · لم تتم المزامنة</string>
+    <string name="settings_history_cache_limit">حد سعة الذاكرة المؤقتة</string>
 </resources>

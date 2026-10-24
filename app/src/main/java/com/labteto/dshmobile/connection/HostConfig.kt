@@ -114,6 +114,8 @@ data class DiscoveredHost(
     val trusted: Boolean get() = description != null
 }
 
+const val DEFAULT_HISTORY_CACHE_LIMIT_BYTES = 2_000_000_000L
+
 /** App-level persisted settings (DataStore). */
 data class AppSettings(
     val autoConnectLast: Boolean = true,
@@ -156,6 +158,7 @@ data class AppSettings(
     val updateCheckEnabled: Boolean = true,
     /** A release the user has already declined, so it is offered once rather than every launch. */
     val dismissedUpdate: String? = null,
+    val historyCacheLimitBytes: Long = DEFAULT_HISTORY_CACHE_LIMIT_BYTES,
 )
 
 /** The three ways the app can reach a harness. Persisted as [AppSettings.connectMode]. */

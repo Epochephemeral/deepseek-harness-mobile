@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">बदलें</string>
     <string name="chatlist_show_all">सभी %1$d दिखाएँ</string>
     <string name="chatlist_show_less">कम दिखाएँ</string>
+    <string name="settings_history_cache">बातचीत कैश</string>
+    <string name="settings_history_cache_usage">इस्तेमाल: %1$s</string>
+    <string name="settings_history_cache_description">जल्दी खोलने के लिए हाल का इतिहास रखता है। भरने पर सबसे लंबे समय से उपयोग न हुआ इतिहास हटाता है। साफ़ करने से लॉगिन या कंप्यूटर की बातचीत नहीं मिटती।</string>
+    <string name="settings_history_cache_clear">बातचीत कैश साफ़ करें</string>
+    <string name="settings_history_cache_clearing">साफ़ हो रहा है…</string>
+    <string name="settings_history_cache_cleared">बातचीत कैश साफ़ हो गया</string>
+    <string name="settings_history_cache_failed">कैश की कार्रवाई विफल हुई। फिर कोशिश करें।</string>
+    <string name="history_cache_syncing">सहेजा इतिहास दिख रहा है · सिंक हो रहा है…</string>
+    <string name="history_cache_stale">सहेजा इतिहास दिख रहा है · सिंक नहीं हुआ</string>
+    <string name="settings_history_cache_limit">कैश सीमा</string>
 </resources>

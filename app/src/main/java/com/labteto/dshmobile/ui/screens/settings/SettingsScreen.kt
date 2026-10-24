@@ -107,6 +107,8 @@ import java.util.Locale
 @Composable
 fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
     val settings by viewModel.state.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.historyCacheUsage.collectAsStateWithLifecycle()
+    val clearingCache by viewModel.clearingCache.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val store = rememberSessionStore()
     val plugins by store.plugins.collectAsStateWithLifecycle()
@@ -123,6 +125,9 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
 
     val hostsCleared = stringResource(R.string.settings_forget_hosts_done)
     val sessionsCleared = stringResource(R.string.settings_clear_last_sessions_done)
+    val cacheCleared = stringResource(R.string.settings_history_cache_cleared)
+    val cacheClearFailed = stringResource(R.string.settings_history_cache_failed)
+    LaunchedEffect(Unit) { viewModel.refreshCacheUsage() }
 
     // Fetched on open rather than kept live: the inventory only changes when the harness is
     // restarted with a different composition, and nothing pushes that over the wire.
@@ -294,6 +299,13 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
                 } else plugins?.let { PluginsCard(it) { pluginsOpen = true } }
 
                 SettingsCard(stringResource(R.string.settings_data)) {
+                    HistoryCacheSection(cacheUsage, clearingCache,
+                        limitBytes = settings.historyCacheLimitBytes,
+                        onLimitChange = { bytes ->
+                            viewModel.setHistoryCacheLimit(bytes) { ok -> if (!ok) toast.second(cacheClearFailed) }
+                        }) {
+                        viewModel.clearHistoryCache { ok -> toast.second(if (ok) cacheCleared else cacheClearFailed) }
+                    }
                     DsButton(
                         text = stringResource(R.string.settings_forget_hosts),
                         onClick = { viewModel.forgetHosts { toast.second(hostsCleared) } },
@@ -405,6 +417,56 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
             }
         }
     }
+}
+
+/** Local, disposable history storage, separate from remembered hosts and remote data. */
+@Composable
+internal fun HistoryCacheSection(
+    usage: com.labteto.dshmobile.data.HistoryCacheUsage?,
+    clearing: Boolean,
+    limitBytes: Long = com.labteto.dshmobile.connection.DEFAULT_HISTORY_CACHE_LIMIT_BYTES,
+    onLimitChange: (Long) -> Unit = {},
+    onClear: () -> Unit,
+) {
+    val colors = DsTheme.colors
+    val context = LocalContext.current
+    Text(stringResource(R.string.settings_history_cache), style = DsType.std14, color = colors.labelPrimary)
+    Text(
+        usage?.let { stringResource(R.string.settings_history_cache_usage,
+            android.text.format.Formatter.formatFileSize(context, it.bytes)) }
+            ?: stringResource(R.string.common_loading),
+        style = DsType.small13,
+        color = colors.labelSecondary,
+    )
+    Row(Modifier.fillMaxWidth().heightIn(min = DsSpacing.touchTarget),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.settings_history_cache_limit), Modifier.weight(1f),
+            style = DsType.std14, color = colors.labelSecondary)
+        DsMenu(
+            anchor = {
+                Row(Modifier.heightIn(min = DsSpacing.touchTarget).padding(horizontal = DsSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(android.text.format.Formatter.formatShortFileSize(context, limitBytes),
+                        style = DsType.std14, color = colors.labelPrimary)
+                    Icon(Icons.Filled.KeyboardArrowDown, null, tint = colors.labelSecondary)
+                }
+            },
+            items = listOf(500_000_000L, 1_000_000_000L, 2_000_000_000L, 4_000_000_000L, 8_000_000_000L).map { bytes ->
+                MenuItem(text = android.text.format.Formatter.formatShortFileSize(context, bytes),
+                    icon = Icons.Filled.Check.takeIf { bytes == limitBytes }) { onLimitChange(bytes) }
+            },
+        )
+    }
+    Text(stringResource(R.string.settings_history_cache_description),
+        style = DsType.small13, color = colors.labelSecondary)
+    DsButton(
+        text = stringResource(if (clearing) R.string.settings_history_cache_clearing else R.string.settings_history_cache_clear),
+        onClick = onClear,
+        enabled = !clearing && (usage?.bytes ?: 0) > 0,
+        variant = DsButtonVariant.Outline,
+        modifier = Modifier.fillMaxWidth(),
+        allowWrap = true,
+    )
 }
 
 /** One settings group as a raised card, so groups read as blocks rather than a running list. */

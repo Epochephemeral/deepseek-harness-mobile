@@ -59,7 +59,46 @@ class SettingsViewModel @Inject constructor(
     private val updateChecker: UpdateChecker,
     private val termux: TermuxHarnessController,
     private val discoveryEngine: DiscoveryEngine,
+    private val historyCache: com.labteto.dshmobile.data.HistoryCache,
 ) : ViewModel() {
+
+    val historyCacheUsage = historyCache.usage
+    private val _clearingCache = MutableStateFlow(false)
+    val clearingCache = _clearingCache.asStateFlow()
+
+    fun setHistoryCacheLimit(bytes: Long, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                hostsStore.setSetting { it.copy(historyCacheLimitBytes = bytes) }
+                historyCache.setLimitBytes(bytes)
+                onDone(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                onDone(false)
+            }
+        }
+    }
+
+    fun refreshCacheUsage() {
+        viewModelScope.launch { historyCache.refreshUsage() }
+    }
+
+    fun clearHistoryCache(onDone: (Boolean) -> Unit) {
+        if (!_clearingCache.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                historyCache.clear()
+                onDone(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                onDone(false)
+            } finally {
+                _clearingCache.value = false
+            }
+        }
+    }
 
     /** The manual update check; see [UpdateChecker.checkNow]. */
     suspend fun checkForUpdateNow(currentVersion: String): UpdateChecker.CheckOutcome =

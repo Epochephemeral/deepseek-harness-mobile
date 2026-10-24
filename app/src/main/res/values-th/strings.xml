@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">แทนที่</string>
     <string name="chatlist_show_all">แสดงทั้งหมด %1$d</string>
     <string name="chatlist_show_less">แสดงน้อยลง</string>
+    <string name="settings_history_cache">แคชการสนทนา</string>
+    <string name="settings_history_cache_usage">ใช้ไป: %1$s</string>
+    <string name="settings_history_cache_description">เก็บประวัติล่าสุดเพื่อเปิดได้เร็วขึ้น เมื่อเต็มจะลบประวัติที่ไม่ได้ใช้งานนานที่สุด การล้างไม่ลบการเข้าสู่ระบบหรือการสนทนาบนคอมพิวเตอร์</string>
+    <string name="settings_history_cache_clear">ล้างแคชการสนทนา</string>
+    <string name="settings_history_cache_clearing">กำลังล้าง…</string>
+    <string name="settings_history_cache_cleared">ล้างแคชการสนทนาแล้ว</string>
+    <string name="settings_history_cache_failed">ดำเนินการกับแคชไม่สำเร็จ โปรดลองอีกครั้ง</string>
+    <string name="history_cache_syncing">แสดงประวัติที่บันทึกไว้ · กำลังซิงค์…</string>
+    <string name="history_cache_stale">แสดงประวัติที่บันทึกไว้ · ยังไม่ได้ซิงค์</string>
+    <string name="settings_history_cache_limit">ขนาดแคชสูงสุด</string>
 </resources>

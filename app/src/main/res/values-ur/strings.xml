@@ -639,4 +639,14 @@
     <string name="hold_replace_draft_confirm">بدلیں</string>
     <string name="chatlist_show_all">سب %1$d دکھائیں</string>
     <string name="chatlist_show_less">کم دکھائیں</string>
+    <string name="settings_history_cache">گفتگو کی کیش</string>
+    <string name="settings_history_cache_usage">استعمال: %1$s</string>
+    <string name="settings_history_cache_description">جلد کھولنے کے لیے حالیہ تاریخ محفوظ رکھتا ہے۔ بھرنے پر سب سے پرانی غیر استعمال شدہ تاریخ ہٹاتا ہے۔ صاف کرنے سے لاگ ان یا کمپیوٹر کی گفتگوئیں نہیں مٹتیں۔</string>
+    <string name="settings_history_cache_clear">گفتگو کی کیش صاف کریں</string>
+    <string name="settings_history_cache_clearing">صاف ہو رہی ہے…</string>
+    <string name="settings_history_cache_cleared">گفتگو کی کیش صاف ہو گئی</string>
+    <string name="settings_history_cache_failed">کیش کی کارروائی ناکام ہوئی۔ دوبارہ کوشش کریں۔</string>
+    <string name="history_cache_syncing">محفوظ تاریخ دکھائی جا رہی ہے · ہم وقت ہو رہی ہے…</string>
+    <string name="history_cache_stale">محفوظ تاریخ دکھائی جا رہی ہے · ہم وقت نہیں ہوئی</string>
+    <string name="settings_history_cache_limit">کیش کی حد</string>
 </resources>
