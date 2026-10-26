@@ -5,6 +5,9 @@ import kotlinx.coroutines.*
 import android.content.SharedPreferences
 import com.labteto.dshmobile.core.wire.WireJson
 import kotlinx.serialization.Serializable
+import com.labteto.dshmobile.data.PromptOutcome
+
+internal enum class PromptDelivery { Idle, Sending, Accepted, Rejected, Unconfirmed }
 
 internal data class ComposerKey(val host: String, val sessionId: String)
 
@@ -28,7 +31,12 @@ internal fun adjustReferences(old: String, next: String, references: List<DraftR
     } }.filter { it.start >= 0 && it.end <= next.length && next.substring(it.start, it.end) == it.mention && (it.start == 0 || next[it.start - 1].isWhitespace()) && (it.end == next.length || next[it.end].isWhitespace()) }
 }
 
-internal class ComposerDraft(val key: ComposerKey, saved: SavedComposer = SavedComposer(), private val save: (SavedComposer) -> Unit = {}) {
+internal class ComposerDraft(
+    val key: ComposerKey,
+    saved: SavedComposer = SavedComposer(),
+    private val deliveryScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    private val save: (SavedComposer) -> Unit = {},
+) {
     private var value by mutableStateOf(saved.text)
     var references by mutableStateOf(saved.references.filter { it.start >= 0 && it.end <= saved.text.length && it.end >= it.start && saved.text.substring(it.start, it.end) == it.mention })
         private set
@@ -54,6 +62,42 @@ internal class ComposerDraft(val key: ComposerKey, saved: SavedComposer = SavedC
     var mode by mutableStateOf("queue")
     var preparing by mutableStateOf(false)
     var submitting by mutableStateOf(false)
+    var delivery by mutableStateOf(PromptDelivery.Idle)
+        private set
+    private var deliveryGeneration = 0L
+    private var acceptedExpiry: Job? = null
+
+    /** Acceptance comes from the host RPC, never from clearing the input or starting a request. */
+    suspend fun trackDelivery(send: suspend () -> PromptOutcome): PromptOutcome {
+        val generation = ++deliveryGeneration
+        acceptedExpiry?.cancel()
+        acceptedExpiry = null
+        delivery = PromptDelivery.Sending
+        try {
+            return send().also { outcome ->
+                // A late response from an older send must not replace the latest receipt.
+                if (generation == deliveryGeneration) {
+                    delivery = when (outcome) {
+                        PromptOutcome.Ok -> PromptDelivery.Accepted
+                        is PromptOutcome.Rejected -> PromptDelivery.Rejected
+                        is PromptOutcome.Failed -> PromptDelivery.Unconfirmed
+                    }
+                    if (delivery == PromptDelivery.Accepted) {
+                        // Session-owned, not composition-owned: navigation/remount cannot restart it.
+                        acceptedExpiry = deliveryScope.launch {
+                            delay(3_000)
+                            if (generation == deliveryGeneration && delivery == PromptDelivery.Accepted) {
+                                delivery = PromptDelivery.Idle
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            if (generation == deliveryGeneration) delivery = PromptDelivery.Unconfirmed
+            throw error
+        }
+    }
     val attachments = mutableStateListOf<PendingAttachment>()
 
     fun restoreRejected(submittedText: String, submitted: List<PendingAttachment>) {
@@ -62,14 +106,16 @@ internal class ComposerDraft(val key: ComposerKey, saved: SavedComposer = SavedC
     }
 }
 
-internal class ComposerRepository(private val preferences: SharedPreferences? = null) {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+internal class ComposerRepository(
+    private val preferences: SharedPreferences? = null,
+    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+) {
     private val drafts = mutableMapOf<ComposerKey, ComposerDraft>()
     fun get(key: ComposerKey): ComposerDraft = drafts.getOrPut(key) {
         val storageKey = "${key.host}/${key.sessionId}"
         val raw = preferences?.getString(storageKey, null)
         val saved = raw?.let { runCatching { WireJson.decodeFromString(SavedComposer.serializer(), it) }.getOrElse { _ -> SavedComposer(it) } } ?: SavedComposer()
-        ComposerDraft(key, saved) { preferences?.edit()?.putString(storageKey, WireJson.encodeToString(SavedComposer.serializer(), it))?.apply() }
+        ComposerDraft(key, saved, deliveryScope = scope) { preferences?.edit()?.putString(storageKey, WireJson.encodeToString(SavedComposer.serializer(), it))?.apply() }
     }
     var imagePickTarget: Pair<ComposerDraft, com.labteto.dshmobile.core.wire.dto.ImageLimitsView>? = null
     var filePickTarget: ComposerDraft? = null

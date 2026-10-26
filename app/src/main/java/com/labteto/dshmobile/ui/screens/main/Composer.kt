@@ -194,6 +194,8 @@ internal fun Composer(
     onSendWith: ((text: String, mode: String) -> Unit)? = null,
     /** Bumped to move focus into the field, after something outside it fills the draft. */
     focusTick: Int = 0,
+    zenMode: Boolean = false,
+    zenMenu: (@Composable () -> Unit)? = null,
 ) {
     var editor by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(draft, androidx.compose.ui.text.TextRange(cursor))) }
     androidx.compose.runtime.LaunchedEffect(draft, cursor) {
@@ -218,6 +220,94 @@ internal fun Composer(
         if (focusTick > 0 && enabled) {
             runCatching { fieldFocus.requestFocus() }
             keyboard?.show()
+        }
+    }
+
+    @Composable
+    fun SendControl() {
+        val sendFill by animateColorAsState(
+            if (canSend) colors.buttonInfoFill else colors.buttonPrimaryDimmed,
+            DsAnimations.tabSwapColor,
+            label = "sendFill",
+        )
+        val sendTint by animateColorAsState(
+            if (canSend) Color.White else colors.labelTertiary,
+            DsAnimations.tabSwapColor,
+            label = "sendTint",
+        )
+        val sendScale by animateFloatAsState(
+            if (canSend) 1f else 0.92f,
+            spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium),
+            label = "sendScale",
+        )
+        fun submit(deliver: (String) -> Unit) {
+            val text = currentDraft
+            // Cleared here as well as through the draft: the field only follows the
+            // draft a frame later, and an IME update landing in that frame (the
+            // keyboard finishing its composing word) carried the sent text back in.
+            editor = androidx.compose.ui.text.input.TextFieldValue("")
+            currentOnDraftChange("")
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            deliver(text)
+        }
+        // Mid-turn a message can steer the running turn or wait for it to end, and the
+        // sticky choice lives two taps away in the + sheet. Holding send makes the choice
+        // for this message alone, the way a hold anywhere else opens what a thing can do.
+        val sendWith = onSendWith?.takeIf { running && canSend }
+        CircleAction(
+            icon = Icons.Filled.ArrowUpward,
+            description = stringResource(R.string.chat_composer_send),
+            size = 40,
+            background = sendFill,
+            tint = sendTint,
+            enabled = canSend,
+            modifier = Modifier.graphicsLayer { scaleX = sendScale; scaleY = sendScale },
+            onClick = { submit { currentOnSend(it) } },
+            onLongClick = sendWith?.let { { sendMenuOpen = true } },
+            longClickLabel = stringResource(R.string.hold_send_label),
+        )
+        // A turn that ends under the open menu takes it away: steering an idle session
+        // is refused, and queueing is then just a send.
+        androidx.compose.runtime.LaunchedEffect(sendWith == null) { if (sendWith == null) sendMenuOpen = false }
+        if (sendMenuOpen && sendWith != null) {
+            HoldMenu(
+                onDismiss = { sendMenuOpen = false },
+                actions = listOf(
+                    HoldAction(
+                        stringResource(R.string.hold_send_steer),
+                        Icons.Outlined.Bolt,
+                        detail = stringResource(R.string.chat_composer_mode_steer_hint),
+                    ) { submit { text -> sendWith(text, "steer") } },
+                    HoldAction(
+                        stringResource(R.string.hold_send_queue),
+                        Icons.Outlined.Schedule,
+                        detail = stringResource(R.string.chat_composer_mode_queue_hint),
+                    ) { submit { text -> sendWith(text, "queue") } },
+                ),
+            )
+        }
+    }
+
+    @Composable
+    fun StopControl() {
+        CircleAction(
+            icon = null,
+            description = stringResource(R.string.chat_composer_stop),
+            size = 40,
+            background = colors.error,
+            tint = Color.White,
+            enabled = true,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStop()
+            },
+        ) {
+            Box(
+                Modifier
+                    .size(11.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White),
+            )
         }
     }
 
@@ -306,6 +396,10 @@ internal fun Composer(
                     // `onSend` action could never fire, and the one that used to sit here never did.
                     // The send key is the button; Ctrl/Cmd+Enter above is the shortcut.
                     enabled = enabled,
+                    leadingIcon = if (zenMode) zenMenu else null,
+                    trailingIcon = if (zenMode) ({
+                        if (running && !canSend) StopControl() else SendControl()
+                    }) else null,
                     placeholder = {
                         Text(
                             stringResource(R.string.chat_composer_hint),
@@ -335,7 +429,7 @@ internal fun Composer(
                 }
                 }
 
-                Row(
+                if (!zenMode) Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(DsSpacing.compact),
@@ -385,67 +479,7 @@ internal fun Composer(
                     // The send button lights up as the draft becomes sendable rather than switching
                     // colour in one frame, and gives a small pop when it does, so the change that
                     // makes it pressable is noticed without looking for it.
-                    val sendFill by animateColorAsState(
-                        if (canSend) colors.buttonInfoFill else colors.buttonPrimaryDimmed,
-                        DsAnimations.tabSwapColor,
-                        label = "sendFill",
-                    )
-                    val sendTint by animateColorAsState(
-                        if (canSend) Color.White else colors.labelTertiary,
-                        DsAnimations.tabSwapColor,
-                        label = "sendTint",
-                    )
-                    val sendScale by animateFloatAsState(
-                        if (canSend) 1f else 0.92f,
-                        spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium),
-                        label = "sendScale",
-                    )
-                    fun submit(deliver: (String) -> Unit) {
-                        val text = currentDraft
-                        // Cleared here as well as through the draft: the field only follows the
-                        // draft a frame later, and an IME update landing in that frame (the
-                        // keyboard finishing its composing word) carried the sent text back in.
-                        editor = androidx.compose.ui.text.input.TextFieldValue("")
-                        currentOnDraftChange("")
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        deliver(text)
-                    }
-                    // Mid-turn a message can steer the running turn or wait for it to end, and the
-                    // sticky choice lives two taps away in the + sheet. Holding send makes the choice
-                    // for this message alone, the way a hold anywhere else opens what a thing can do.
-                    val sendWith = onSendWith?.takeIf { running && canSend }
-                    CircleAction(
-                        icon = Icons.Filled.ArrowUpward,
-                        description = stringResource(R.string.chat_composer_send),
-                        size = 40,
-                        background = sendFill,
-                        tint = sendTint,
-                        enabled = canSend,
-                        modifier = Modifier.graphicsLayer { scaleX = sendScale; scaleY = sendScale },
-                        onClick = { submit { currentOnSend(it) } },
-                        onLongClick = sendWith?.let { { sendMenuOpen = true } },
-                        longClickLabel = stringResource(R.string.hold_send_label),
-                    )
-                    // A turn that ends under the open menu takes it away: steering an idle session
-                    // is refused, and queueing is then just a send.
-                    androidx.compose.runtime.LaunchedEffect(sendWith == null) { if (sendWith == null) sendMenuOpen = false }
-                    if (sendMenuOpen && sendWith != null) {
-                        HoldMenu(
-                            onDismiss = { sendMenuOpen = false },
-                            actions = listOf(
-                                HoldAction(
-                                    stringResource(R.string.hold_send_steer),
-                                    Icons.Outlined.Bolt,
-                                    detail = stringResource(R.string.chat_composer_mode_steer_hint),
-                                ) { submit { text -> sendWith(text, "steer") } },
-                                HoldAction(
-                                    stringResource(R.string.hold_send_queue),
-                                    Icons.Outlined.Schedule,
-                                    detail = stringResource(R.string.chat_composer_mode_queue_hint),
-                                ) { submit { text -> sendWith(text, "queue") } },
-                            ),
-                        )
-                    }
+                    SendControl()
 
                     // Grows its own width in and out, so the controls beside it slide over rather than
                     // jumping by a button's width the moment a turn starts or ends.
@@ -454,25 +488,7 @@ internal fun Composer(
                         enter = fadeIn(DsAnimations.fade) + expandHorizontally(DsAnimations.expand) + scaleIn(initialScale = 0.85f),
                         exit = fadeOut(DsAnimations.fade) + shrinkHorizontally(DsAnimations.expand) + scaleOut(targetScale = 0.85f),
                     ) {
-                        CircleAction(
-                            icon = null,
-                            description = stringResource(R.string.chat_composer_stop),
-                            size = 40,
-                            background = colors.error,
-                            tint = Color.White,
-                            enabled = true,
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onStop()
-                            },
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(11.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(Color.White),
-                            )
-                        }
+                        StopControl()
                     }
                 }
             }
@@ -489,7 +505,7 @@ internal fun Composer(
  * deployment that renamed one.
  */
 @Composable
-private fun PermissionChip(
+internal fun PermissionChip(
     select: PermissionSelect?,
     pending: String?,
     enabled: Boolean,

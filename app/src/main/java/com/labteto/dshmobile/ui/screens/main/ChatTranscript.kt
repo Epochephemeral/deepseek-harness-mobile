@@ -129,6 +129,8 @@ internal fun ChatTranscript(
     onSuggestion: ((String) -> Unit)? = null,
     /** Bumped each time the reader sends: their own message is always worth landing on. */
     sentTick: Int = 0,
+    /** Zen keeps transport diagnostics out of the reading surface, without retrying failed pages. */
+    showStatusNotices: Boolean = true,
 ) {
     // Only the nodes that draw something: a zero-height item still costs its 4dp gap, and a turn's
     // worth of structural events stacks those gaps into a blank band under the chrome.
@@ -392,7 +394,7 @@ internal fun ChatTranscript(
                 }
             }
         }
-        if (hasMore) {
+        if (hasMore && (showStatusNotices || (!loadingOlder && !loadOlderFailed))) {
             // The far end of a reversed list is the oldest message, so the paging row goes last.
             item(key = "load-older") {
                 LoadOlderRow(

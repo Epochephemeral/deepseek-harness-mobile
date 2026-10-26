@@ -138,6 +138,12 @@ fun ChatScreen(
     var sentTick by remember { mutableIntStateOf(0) }
     var mode by composer::mode
     var tab by rememberSaveable { mutableStateOf(ChatTab.Chat) }
+    val chatPreferences = remember(context) { context.getSharedPreferences("chat_ui", android.content.Context.MODE_PRIVATE) }
+    var zenMode by rememberSaveable { mutableStateOf(chatPreferences.getBoolean("zen_mode", false)) }
+    fun setZen(enabled: Boolean) {
+        zenMode = enabled
+        chatPreferences.edit().putBoolean("zen_mode", enabled).apply()
+    }
     val attachments = composer.attachments
 
     var panelKey by remember { mutableStateOf<ComposerKey?>(null) }
@@ -436,10 +442,12 @@ fun ChatScreen(
                     // message into several and put both limits permanently out of reach. Files
                     // ride the same call as receipts; a receipt the host refuses stays staged,
                     // so restoring the chips is enough to try again.
-                    val outcome = if (pending.isEmpty()) {
-                        store.prompt(text, delivery, targetId, targetHost)
-                    } else {
-                        store.promptWithAttachments(text, delivery, images.map { it.encoded() }, receipts, targetId, targetHost)
+                    val outcome = composer.trackDelivery {
+                        if (pending.isEmpty()) {
+                            store.prompt(text, delivery, targetId, targetHost)
+                        } else {
+                            store.promptWithAttachments(text, delivery, images.map { it.encoded() }, receipts, targetId, targetHost)
+                        }
                     }
                     if (outcome !is PromptOutcome.Ok) {
                         composer.restoreRejected(text, pending)
@@ -470,7 +478,7 @@ fun ChatScreen(
         // itself or the chrome ends up underneath the status bar. safeDrawing covers the status
         // bar, the gesture area and the keyboard in one modifier.
         Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-            ChatTopBar(
+            if (!zenMode) ChatTopBar(
                 title = title,
                 running = conversation?.running == true,
                 models = models,
@@ -496,9 +504,10 @@ fun ChatScreen(
                 onOpenWorkspace = { panelKey = composer.key },
                 workspaceEnabled = currentSessionId != null,
                 historyEnabled = currentSessionId != null,
+                onEnterZen = { setZen(true) },
             )
 
-            if (conversation?.fromCache == true) {
+            if (!zenMode && conversation?.fromCache == true) {
                 androidx.compose.material3.Text(
                     stringResource(if (connectionError == null) R.string.history_cache_syncing else R.string.history_cache_stale),
                     style = com.labteto.dshmobile.ui.theme.DsType.small13,
@@ -506,15 +515,17 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
-            AnimatedPresence(connectionError) {
-                ConnectionBanner(
-                    message = it,
-                    actionLabel = stringResource(R.string.common_retry),
-                    onAction = { store.retryConnection() },
-                )
-            }
-            AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null && !historySyncing }) {
-                ConnectionBanner(stringResource(R.string.common_reconnecting), warning = true)
+            if (!zenMode) {
+                AnimatedPresence(connectionError) {
+                    ConnectionBanner(
+                        message = it,
+                        actionLabel = stringResource(R.string.common_retry),
+                        onAction = { store.retryConnection() },
+                    )
+                }
+                AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null && !historySyncing }) {
+                    ConnectionBanner(stringResource(R.string.common_reconnecting), warning = true)
+                }
             }
 
             val nodeContext = ChatNodeContext(
@@ -554,7 +565,7 @@ fun ChatScreen(
                 val composerMaxHeight = (maxHeight * 0.6f).coerceAtLeast(180.dp)
                 Column(Modifier.fillMaxSize()) {
                 AnimatedContent(
-                    targetState = tab,
+                    targetState = if (zenMode) ChatTab.Chat else tab,
                     transitionSpec = {
                         val forward = targetState.ordinal > initialState.ordinal
                         (
@@ -578,6 +589,7 @@ fun ChatScreen(
                             jumpToSeq = pendingJumpSeq,
                             onJumpConsumed = { pendingJumpSeq = null },
                             sentTick = sentTick,
+                            showStatusNotices = !zenMode,
                             onSuggestion = if (currentSessionId != null) {
                                 { text -> draft = text; composer.selection = text.length }
                             } else {
@@ -597,7 +609,7 @@ fun ChatScreen(
                     }
                 }
 
-                conversation?.let { conv ->
+                conversation?.takeUnless { zenMode }?.let { conv ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -709,6 +721,7 @@ fun ChatScreen(
                     )
                 }
 
+                if (!zenMode) PromptDeliveryNotice(composer.delivery)
                 Composer(
                     modifier = Modifier.heightIn(max = composerMaxHeight),
                     references = composer.references,
@@ -758,13 +771,36 @@ fun ChatScreen(
                     onSendWith = { text, delivery -> send(text, delivery) },
                     onStop = { scope.launch { store.cancelTurn() } },
                     focusTick = composerFocusTick,
+                    zenMode = zenMode,
+                    zenMenu = {
+                        ZenMenu(
+                            actions = listOf(
+                                ZenAction(R.string.chat_zen_exit) { setZen(false) },
+                                ZenAction(R.string.chatlist_open, run = onOpenDrawer),
+                                ZenAction(R.string.models_title) { sheet = ChatSheet.Models },
+                                ZenAction(R.string.chat_history_title, currentSessionId != null) { sheet = ChatSheet.History },
+                                ZenAction(R.string.panel_workspace, currentSessionId != null) { panelKey = composer.key },
+                                ZenAction(R.string.chat_details_title, run = onOpenDetails),
+                                ZenAction(R.string.chat_composer_commands, currentSessionId != null) { sheet = ChatSheet.Commands },
+                                ZenAction(R.string.harness_add_reference, currentSessionId != null) {
+                                    referencePicker = activeReference(draft, composer.selection) ?: AtQuery(composer.selection, composer.selection, "")
+                                },
+                                ZenAction(R.string.chat_composer_stop, conversation?.running == true) { scope.launch { store.cancelTurn() } },
+                            ),
+                            permissions = {
+                                PermissionChip(permissions, pendingPermission, currentSessionId != null && !composer.submitting) {
+                                    value -> scope.launch { report(store.setPermissionPreset(value)) }
+                                }
+                            },
+                        )
+                    },
                 )
 
-                StatsFooter(stats = sessionStats, usage = tokenUsage)
+                if (!zenMode) StatsFooter(stats = sessionStats, usage = tokenUsage)
                 }
             }
         }
-        DsToastHost(toast, modifier = Modifier.fillMaxWidth())
+        if (!zenMode) DsToastHost(toast, modifier = Modifier.fillMaxWidth())
     }
 
     }

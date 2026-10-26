@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.Icon
@@ -124,6 +125,7 @@ internal fun ChatTopBar(
     /** False while no session is open, where there is no history to pick from yet. */
     historyEnabled: Boolean,
     modifier: Modifier = Modifier,
+    onEnterZen: (() -> Unit)? = null,
 ) {
     val colors = DsTheme.colors
     Column(modifier.fillMaxWidth().background(colors.bgBase)) {
@@ -159,6 +161,12 @@ internal fun ChatTopBar(
                     )
                 }
             }
+            if (onEnterZen != null) DsIconButton(
+                icon = androidx.compose.material.icons.Icons.Outlined.Fullscreen,
+                contentDescription = stringResource(R.string.chat_zen_enter),
+                onClick = onEnterZen,
+                tint = colors.labelSecondary,
+            )
             RunStatus(running)
             if (!detailsOpen) {
                 DsIconButton(

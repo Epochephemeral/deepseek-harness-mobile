@@ -1518,9 +1518,14 @@ class SessionStore @Inject constructor(
     }
 
     // ------------------------------------------------------------------ public RPC surface
-    suspend fun refreshSessions() {
-        val api = apiOrNull() ?: return
-        when (val r = api.sessionList(null)) {
+    /** Fetch the current host's catalog without changing the open conversation or draft. */
+    suspend fun refreshSessions(): Boolean {
+        val api = apiOrNull() ?: return false
+        val host = activeHostKey
+        val r = api.sessionList(null)
+        // An answer from a disconnected/replaced client must not populate another host's drawer.
+        if (host != activeHostKey || api !== connectionManager.connectedApi) return false
+        return when (r) {
             is RpcResult.Ok -> {
                 clearConnectionError()
                 synchronized(lock) {
@@ -1545,8 +1550,9 @@ class SessionStore @Inject constructor(
                     }
                     emitSessionsLocked()
                 }
+                true
             }
-            is RpcResult.Err -> setConnectionError(r.error.message)
+            is RpcResult.Err -> { setConnectionError(r.error.message); false }
         }
     }
 

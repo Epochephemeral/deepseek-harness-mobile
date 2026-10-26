@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="chatlist_refresh">Refresh session list</string>
+    <string name="chatlist_refreshing">Refreshing session list…</string>
+    <string name="chatlist_refresh_failed">Could not refresh. Check your connection and try again.</string>
+    <string name="chat_zen_enter">Enter Zen Mode</string>
+    <string name="chat_zen_exit">Exit Zen Mode</string>
+    <string name="chat_zen_menu">Chat options</string>
+    <string name="chat_zen_permissions">Permissions</string>
+
+    <string name="chat_delivery_sending">Sending…</string>
+    <string name="chat_delivery_accepted">Sent · Received by host</string>
+    <string name="chat_delivery_rejected">Message rejected</string>
+    <string name="chat_delivery_unconfirmed">Delivery unconfirmed · Check this conversation</string>
     <string name="app_name" translatable="false">DSH Mobile</string>
     <string name="app_long_name">DeepSeek Harness Remote</string>
     <string name="common_cancel">Cancel</string>

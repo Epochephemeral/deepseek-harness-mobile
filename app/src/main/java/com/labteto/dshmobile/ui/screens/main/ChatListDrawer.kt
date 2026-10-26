@@ -35,6 +35,13 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -133,6 +140,25 @@ fun ChatListDrawer(
 
     var query by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
+    var refreshing by remember(store.activeHostKey) { mutableStateOf(false) }
+    var refreshFailed by remember(store.activeHostKey) { mutableStateOf(false) }
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        refreshFailed = false
+        scope.launch {
+            try {
+                refreshFailed = !store.refreshSessions()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                refreshFailed = true
+            } finally {
+                refreshing = false
+            }
+        }
+    }
     // Persisted, not remembered: the order you read your sessions in is a preference, and it used
     // to reset every time the drawer was closed.
     val sessionSort by hostsStore.sessionSort.collectAsStateWithLifecycle(initialValue = SORT_MANUAL)
@@ -224,8 +250,29 @@ fun ChatListDrawer(
                 text = stringResource(R.string.chatlist_title),
                 style = DsType.large20,
                 color = colors.labelPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (refreshing) {
+                val label = stringResource(R.string.chatlist_refreshing)
+                Box(
+                    Modifier.size(48.dp).semantics {
+                        contentDescription = label
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(Modifier.size(20.dp), color = colors.accent, strokeWidth = 2.dp)
+                }
+            } else {
+                DsIconButton(
+                    icon = Icons.Outlined.Refresh,
+                    contentDescription = stringResource(R.string.chatlist_refresh),
+                    onClick = { refresh() },
+                    tint = colors.labelSecondary,
+                )
+            }
             DsIconButton(
                 icon = Icons.Filled.Search,
                 contentDescription = stringResource(R.string.common_search),
@@ -245,6 +292,16 @@ fun ChatListDrawer(
                 contentDescription = stringResource(R.string.settings_title),
                 onClick = onOpenSettings,
                 tint = colors.labelTertiary,
+            )
+        }
+
+        if (refreshFailed) {
+            Text(
+                stringResource(R.string.chatlist_refresh_failed),
+                color = colors.error,
+                style = DsType.small13,
+                modifier = Modifier.fillMaxWidth().padding(vertical = DsSpacing.small)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
 
