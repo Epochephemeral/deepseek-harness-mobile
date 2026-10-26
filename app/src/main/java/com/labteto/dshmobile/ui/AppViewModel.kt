@@ -21,7 +21,7 @@ import javax.inject.Inject
 @HiltViewModel
 class AppViewModel @Inject constructor(
     hostsStore: HostsStore,
-    connectionManager: ConnectionManager,
+    private val connectionManager: ConnectionManager,
     private val updateChecker: UpdateChecker,
     private val termux: TermuxHarnessController,
 ) : ViewModel() {
@@ -36,6 +36,8 @@ class AppViewModel @Inject constructor(
 
     /** A newer release to offer, or null. See [UpdateChecker]. */
     val availableUpdate: StateFlow<AvailableUpdate?> = updateChecker.available
+
+    fun recoverConnectionOnForeground() = connectionManager.recoverOnForeground()
 
     /** Safe to call on every resume: the checker rate-limits itself. */
     fun checkForUpdate(currentVersion: String) {

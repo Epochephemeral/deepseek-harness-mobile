@@ -24,6 +24,8 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.close
 import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
@@ -379,6 +381,11 @@ class MockHarness(
         newServer.start(wait = false)
         server = newServer
         return newServer.engine.resolvedConnectors().first().port
+    }
+
+    /** Ask connected clients to complete the WebSocket close handshake. */
+    suspend fun closeMuxConnections() {
+        muxSockets.keys.toList().forEach { it.close(CloseReason(CloseReason.Codes.GOING_AWAY, "host unavailable")) }
     }
 
     /**

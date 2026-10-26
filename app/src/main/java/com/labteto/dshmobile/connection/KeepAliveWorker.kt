@@ -1,8 +1,10 @@
 package com.labteto.dshmobile.connection
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -12,12 +14,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
 
-/**
- * Periodic fallback for users who did not enable the foreground service:
- * if the app still wants a connection (keepConnectedInBackground) and the
- * loop died in the background, this re-establishes it. Runs at most every
- * 15 minutes (WorkManager minimum interval).
- */
+/** Periodically asks the manager to recover an eligible in-memory connection. */
 class KeepAliveWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -32,24 +29,29 @@ class KeepAliveWorker(
 
     override suspend fun doWork(): Result {
         val entry = EntryPointAccessors.fromApplication(applicationContext, WorkerEntryPoint::class.java)
-        val settings = entry.hostsStore().settingsOnce()
-        if (!settings.keepConnectedInBackground) return Result.success()
-        val manager = entry.connectionManager()
-        val state = manager.state.value
-        if (state.host != null && state.phase != ConnectionPhase.CONNECTED) {
-            manager.reconnectIfNeeded()
-        }
+        if (!entry.hostsStore().settingsOnce().keepConnectedInBackground) return Result.success()
+        entry.connectionManager().recoverIfNeeded()
         return Result.success()
     }
 
     companion object {
         const val WORK_NAME = "dsh-keep-alive"
 
+        /**
+         * Best-effort fallback while the process retains a desired connection, not cold-process
+         * recovery: a newly created manager has no target host. WorkManager timing is inexact.
+         */
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        }
+
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<KeepAliveWorker>(15, TimeUnit.MINUTES).build()
+            val request = PeriodicWorkRequestBuilder<KeepAliveWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 request,
             )
         }

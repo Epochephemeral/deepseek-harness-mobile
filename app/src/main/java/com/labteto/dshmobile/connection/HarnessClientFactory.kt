@@ -11,6 +11,9 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Unary and streaming carriers belonging to the same authentication snapshot. */
+data class HarnessConnection(val api: DshApiClient, val mux: RemoteStreamMux)
+
 /**
  * The one place a [DshApiClient] is built.
  *
@@ -85,21 +88,23 @@ class HarnessClientFactory @Inject constructor(
         )
     }
 
-    /**
-     * The mux carrying every stream of one connection generation.
-     *
-     * Separate from [clientFor] because its lifetime is the generation's, not the client's: the
-     * connection loop builds a new one per attempt and closes it when the generation ends, while
-     * the unary client outlives both.
-     */
-    suspend fun muxFor(config: HostConfig): RemoteStreamMux {
+    /** Both carriers of a generation share one credential snapshot, refreshed on every attempt. */
+    suspend fun connectionFor(config: HostConfig): HarnessConnection {
         val http = httpClient(config.relayFingerprint)
         val authorization = authorizationFor(config)
-        val base = config.baseUrl
         val cookie = cookieFor(config)
-        return RemoteStreamMux { sink ->
-            WsChannel(com.labteto.dshmobile.core.wire.resolveHarnessUrl(base, REMOTE_STREAM_MUX_PATH).toString(), http, sink, authorization, cookie)
+        val api = DshApiClient(
+            transport = OkHttpRpcTransport(
+                baseUrl = config.baseUrl,
+                client = http,
+                authorization = authorization,
+                cookie = cookie,
+            ),
+        )
+        val mux = RemoteStreamMux { sink ->
+            WsChannel(com.labteto.dshmobile.core.wire.resolveHarnessUrl(config.baseUrl, REMOTE_STREAM_MUX_PATH).toString(), http, sink, authorization, cookie)
         }
+        return HarnessConnection(api, mux)
     }
 
     /**

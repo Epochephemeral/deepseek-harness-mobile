@@ -64,7 +64,10 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
     val update by viewModel.availableUpdate.collectAsStateWithLifecycle()
     // On every return to the foreground, not just the first composition: the checker decides
     // whether enough time has passed to ask GitHub again.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.checkForUpdate(BuildConfig.VERSION_NAME) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.recoverConnectionOnForeground()
+        viewModel.checkForUpdate(BuildConfig.VERSION_NAME)
+    }
 
     DshTheme(preference = themePreference) {
         val toast = rememberDsToast()

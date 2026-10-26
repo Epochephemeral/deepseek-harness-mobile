@@ -49,7 +49,10 @@ interface RemoteStream {
      */
     suspend fun receive(): JsonElement?
 
-    /** Tell the host to stop. Idempotent, and safe to call on an already-dead stream. */
+    /**
+     * Tell the host to stop and discard buffered items. Idempotent on an already-dead stream.
+     * A suspended or subsequent [receive] is cancelled with CancellationException.
+     */
     fun cancel()
 
     /**
@@ -120,6 +123,9 @@ class RemoteStreamMux(
         }
 
         override fun cancel() {
+            // Channel cancellation both wakes receive and releases queued item references. Closing
+            // it normally would retain the queue and leave cancelled consumers draining old data.
+            signals.cancel()
             if (!done.compareAndSet(false, true)) return
             // Best-effort: on a dead socket the send fails, which is exactly when the host has
             // already forgotten the stream.
@@ -132,6 +138,7 @@ class RemoteStreamMux(
     private val streams = ConcurrentHashMap<String, Stream>()
     private val nextStreamId = AtomicLong(1)
     private val started = AtomicBoolean(false)
+    private val lifecycleLock = Any()
     private val opened = CompletableDeferred<Unit>()
 
     @Volatile
@@ -192,9 +199,24 @@ class RemoteStreamMux(
     /** Perform the handshake. Idempotent; [awaitOpen] waits for it to land. */
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        val created = channelFactory(sink)
-        channel = created
-        created.start()
+        if (closedCause != null) return
+        try {
+            val created = channelFactory(sink)
+            synchronized(lifecycleLock) {
+                if (closedCause != null) {
+                    created.close()
+                    return
+                }
+                channel = created
+                // Serialize publication/start with close; a close during channelFactory must not
+                // be followed by publishing and starting an orphaned socket.
+                created.start()
+            }
+        } catch (e: Throwable) {
+            failAll(e)
+            runCatching { closeChannel() }
+            throw e
+        }
     }
 
     /**
@@ -261,8 +283,14 @@ class RemoteStreamMux(
     /** Tear the socket down and fail every open logical stream. Idempotent. */
     fun close() {
         failAll(null)
-        channel?.close()
-        channel = null
+        closeChannel()
+    }
+
+    private fun closeChannel() {
+        val closing = synchronized(lifecycleLock) {
+            channel.also { channel = null }
+        }
+        closing?.close()
     }
 
     private fun send(message: RemoteStreamClientMessage): Boolean {

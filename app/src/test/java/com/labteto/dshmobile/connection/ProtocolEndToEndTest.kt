@@ -186,6 +186,39 @@ class ProtocolEndToEndTest {
         } ?: false
 
     @Test
+    fun `an initially unavailable host connects automatically when it returns`() = runBlocking {
+        harness.stop()
+        harness = MockHarness(port = port)
+        val recorder = Recorder()
+        val loop = ConnectionLoop({ mux() }, recorder,
+            LoopConfig(baseDelayMs = 100, maxDelayMs = 200, streamOpenTimeoutMs = 500))
+        loop.start()
+        try {
+            assertTrue("offline attempts should remain in the connection loop", await { recorder.failures.size >= 2 })
+            harness.start()
+            assertTrue("returning host did not reconnect without another user action", await { recorder.connected.isNotEmpty() })
+        } finally { loop.stop() }
+    }
+
+    @Test
+    fun `server initiated socket close completes and automatically reconnects`() = runBlocking {
+        val recorder = Recorder()
+        val loop = ConnectionLoop({ mux() }, recorder, LoopConfig(baseDelayMs = 100, maxDelayMs = 200))
+        loop.start()
+        try {
+            assertTrue(await { recorder.connected.isNotEmpty() })
+            val previous = recorder.connected.single().mux
+            harness.closeMuxConnections()
+            val recovered = withTimeoutOrNull(2_500) {
+                while (recorder.connected.size < 2) delay(10)
+                true
+            } ?: false
+            assertTrue("WebSocket close handshake must not leave the loop waiting on a retired socket", recovered)
+            assertTrue(recorder.connected.last().mux !== previous)
+        } finally { loop.stop() }
+    }
+
+    @Test
     fun `the handshake completes over a real socket`() = runBlocking {
         val recorder = Recorder()
         val loop = ConnectionLoop({ mux() }, recorder, LoopConfig(delay = { }))

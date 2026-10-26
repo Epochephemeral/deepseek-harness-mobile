@@ -5,17 +5,23 @@ import com.labteto.dshmobile.core.wire.dto.REMOTE_EVENT_STREAM_ENDPOINT
 import com.labteto.dshmobile.core.wire.dto.RemoteEventFrame
 import kotlin.math.pow
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonElement
 
@@ -75,7 +81,7 @@ data class HostGeneration(
     val mux: RemoteStreamMux,
 )
 
-/** Callbacks from the connection loop. Exceptions thrown here never kill the loop. */
+/** Callbacks from the connection loop. Non-cancellation exceptions never kill the loop. */
 interface LoopSinks {
     /**
      * One frame from the `$events` stream: a notification, a pending waterfall, or a withdrawal.
@@ -125,6 +131,11 @@ class LoopConfig(
     val readyTimeoutMs: Long = 5_000L,
     /** Injectable sleep used between generations. */
     val delay: suspend (Long) -> Unit = ::defaultSleep,
+    /** Only a generation online this long clears consecutive-failure backoff. */
+    val stableConnectionMs: Long = 30_000L,
+    /** Monotonic clock, injectable alongside the coroutine dispatcher in tests. */
+    val monotonicTimeMs: () -> Long = { System.nanoTime() / 1_000_000L },
+    val random: Random = Random.Default,
 )
 
 /** Default reconnect sleep (delegates to kotlinx.coroutines.delay). */
@@ -147,35 +158,53 @@ private suspend fun defaultSleep(ms: Long) {
  * Here there is one socket, and everything else the app streams is a further logical stream on
  * it, opened through [HostGeneration.mux].
  *
- * [start] and [stop] are idempotent. Sink exceptions are contained and never kill the loop.
+ * [start] and [stop] are idempotent. Non-cancellation sink exceptions are contained.
  */
 class ConnectionLoop(
     private val muxFactory: suspend () -> RemoteStreamMux,
     private val sinks: LoopSinks,
     private val config: LoopConfig = LoopConfig(),
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** External readiness gate (e.g. network availability), outside handshake timeout budgets. */
+    private val awaitAttempt: suspend () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 
     @Volatile
     private var job: Job? = null
 
-    @Volatile
-    private var current: RemoteStreamMux? = null
+    private var retryWaiter: CompletableDeferred<Unit>? = null
 
-    /** Begin the loop. Idempotent. */
+    val isRunning: Boolean
+        get() = job?.isActive == true
+
+    /** Begin the loop. Idempotent. Register before dispatch, even on immediate dispatchers. */
+    @Synchronized
     fun start() {
         if (job != null) return
-        val newJob = scope.launch { runLoop() }
+        val newJob = scope.launch(start = CoroutineStart.LAZY) { runLoop() }
         job = newJob
+        newJob.invokeOnCompletion {
+            synchronized(this) {
+                if (job === newJob) job = null
+            }
+        }
+        newJob.start()
     }
 
-    /** Stop the loop and tear down the mux. Idempotent. */
+    /** Cancel the owner; its finally tears down even a mux returned after cancellation. */
+    @Synchronized
     fun stop() {
         val running = job ?: return
         job = null
+        retryWaiter = null
         running.cancel()
-        closeGeneration()
+    }
+
+    /** Wake only an existing backoff wait; never interrupt a handshake or an online socket. */
+    @Synchronized
+    fun requestRetry() {
+        retryWaiter?.complete(Unit)
     }
 
     // ---------------------------------------------------------------- loop
@@ -184,24 +213,39 @@ class ConnectionLoop(
         var attempt = 0
         while (currentCoroutineContext().isActive) {
             safeSink { sinks.onStateChange(ConnectionState.RECONNECTING) }
-            when (val opened = openGeneration()) {
-                is Opened.Ok -> {
-                    attempt = 0
-                    safeSink { sinks.onConnected(opened.generation) }
-                    safeSink { sinks.onStateChange(ConnectionState.CONNECTED) }
-                    consumeEvents(opened.events)
-                    closeGeneration()
-                }
+            awaitAttempt()
+            currentCoroutineContext().ensureActive()
+            // This coroutine alone owns its mux. A stopped run can finish after its replacement
+            // starts, so cleanup must never consult a shared "current generation" field.
+            var mux: RemoteStreamMux? = null
+            try {
+                when (val opened = openGeneration { mux = it }) {
+                    is Opened.Ok -> {
+                        currentCoroutineContext().ensureActive()
+                        val readyAt = config.monotonicTimeMs()
+                        safeSink { sinks.onConnected(opened.generation) }
+                        currentCoroutineContext().ensureActive()
+                        safeSink { sinks.onStateChange(ConnectionState.CONNECTED) }
+                        consumeEvents(opened.events)
+                        if (config.monotonicTimeMs() - readyAt >= config.stableConnectionMs) {
+                            attempt = 0
+                        }
+                        attempt += 1
+                    }
 
-                is Opened.Failed -> {
-                    attempt += 1
-                    val reported = attempt
-                    closeGeneration()
-                    safeSink { sinks.onGenerationFailed(reported, opened.failure) }
+                    is Opened.Failed -> {
+                        currentCoroutineContext().ensureActive()
+                        attempt += 1
+                        safeSink { sinks.onGenerationFailed(attempt, opened.failure) }
+                    }
                 }
+            } finally {
+                mux?.let { runCatching { it.close() } }
             }
-            if (!currentCoroutineContext().isActive) break
-            config.delay(nextBackoff(attempt))
+            currentCoroutineContext().ensureActive()
+            // Retire readiness before sleeping; callers must not use a dead generation during backoff.
+            safeSink { sinks.onStateChange(ConnectionState.RECONNECTING) }
+            awaitBackoff(nextBackoff(attempt))
         }
     }
 
@@ -219,16 +263,21 @@ class ConnectionLoop(
      * handle rather than a cold flow: collecting a flow twice would open two event generations
      * for one connection.
      */
-    private suspend fun openGeneration(): Opened {
+    private suspend fun openGeneration(own: (RemoteStreamMux) -> Unit): Opened {
         safeSink { sinks.onHandshakeStep(HandshakeStep.OPENING_MUX) }
-        val mux = muxFactory()
-        current = mux
-        mux.start()
-
-        try {
-            withTimeout(config.streamOpenTimeoutMs) { mux.awaitOpen() }
-        } catch (e: TimeoutCancellationException) {
-            return Opened.Failed(GenerationFailure.MuxTimedOut(config.streamOpenTimeoutMs))
+        val mux = try {
+            withTimeoutOrNull(config.streamOpenTimeoutMs) {
+                val created = muxFactory()
+                // Record ownership before checking cancellation: even a non-cooperative factory
+                // returning after stop must hand its resource to the generation's finally.
+                own(created)
+                currentCoroutineContext().ensureActive()
+                created.start()
+                created.awaitOpen()
+                created
+            } ?: return Opened.Failed(GenerationFailure.MuxTimedOut(config.streamOpenTimeoutMs))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             return Opened.Failed(
                 GenerationFailure.MuxFailed(TransportFailures.classify(e), e.message),
@@ -238,17 +287,27 @@ class ConnectionLoop(
         safeSink { sinks.onHandshakeStep(HandshakeStep.AWAITING_READY) }
         val events = try {
             mux.open(REMOTE_EVENT_STREAM_ENDPOINT)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: RemoteStreamException) {
             return Opened.Failed(GenerationFailure.ReadyFailed(e.error))
+        } catch (e: Throwable) {
+            return Opened.Failed(
+                GenerationFailure.ReadyFailed(RpcError("internal", e.message ?: "events stream failed")),
+            )
         }
         val ready = try {
-            withTimeout(config.readyTimeoutMs) { events.receive() }
-        } catch (e: TimeoutCancellationException) {
-            return Opened.Failed(
-                GenerationFailure.ReadyFailed(
-                    RpcError("internal", "no ready frame within ${config.readyTimeoutMs}ms"),
-                ),
-            )
+            // The wrapper distinguishes a clean end (null item) from our own timeout; an outer
+            // cancellation, including another timeout, must continue propagating.
+            val received = withTimeoutOrNull(config.readyTimeoutMs) { events.receive() to Unit }
+                ?: return Opened.Failed(
+                    GenerationFailure.ReadyFailed(
+                        RpcError("internal", "no ready frame within ${config.readyTimeoutMs}ms"),
+                    ),
+                )
+            received.first
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: RemoteStreamException) {
             return Opened.Failed(GenerationFailure.ReadyFailed(e.error))
         } catch (e: Throwable) {
@@ -315,32 +374,48 @@ class ConnectionLoop(
         null
     }
 
-    /** Tear down the current generation's socket. */
-    private fun closeGeneration() {
-        val mux = current
-        current = null
-        if (mux != null) runCatching { mux.close() }
+    private suspend fun awaitBackoff(ms: Long) = coroutineScope {
+        val waiter = CompletableDeferred<Unit>()
+        val owner = currentCoroutineContext()[Job]
+        // The backoff scope is a child of the loop job; don't publish a waiter after stop.
+        synchronized(this@ConnectionLoop) {
+            if (job?.isActive == true && owner?.isActive == true) retryWaiter = waiter
+        }
+        val sleep = async { config.delay(ms) }
+        try {
+            select<Unit> {
+                sleep.onAwait { }
+                waiter.onAwait { }
+            }
+        } finally {
+            sleep.cancel()
+            synchronized(this@ConnectionLoop) {
+                if (retryWaiter === waiter) retryWaiter = null
+            }
+        }
     }
 
     /**
-     * Exponential backoff with jitter: the attempt cap is min(maxDelay, base * factor^attempt),
+     * Exponential backoff with jitter: the attempt cap is min(maxDelay, base * factor^(attempt-1)),
      * and the actual sleep is uniform in [cap/2, cap].
      */
     private fun nextBackoff(attempt: Int): Long {
         val cap = minOf(
             config.maxDelayMs,
-            (config.baseDelayMs * config.backoffFactor.pow(attempt)).toLong(),
+            (config.baseDelayMs * config.backoffFactor.pow((attempt - 1).coerceAtLeast(0))).toLong(),
         ).coerceAtLeast(config.baseDelayMs)
         val bounded = minOf(cap, config.jitterCapMs)
         val half = bounded / 2
         val span = bounded - half
-        return if (span <= 0) half else half + Random.nextLong(span + 1)
+        return if (span <= 0) half else half + config.random.nextLong(span + 1)
     }
 
     /** Sink exceptions must not kill the loop. */
     private inline fun safeSink(block: () -> Unit) {
         try {
             block()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             // Contain: a misbehaving sink must not take the loop down.
         }

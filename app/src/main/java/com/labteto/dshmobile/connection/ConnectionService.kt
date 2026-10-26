@@ -4,8 +4,6 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.labteto.dshmobile.MainActivity
@@ -33,8 +31,24 @@ class ConnectionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Meet the foreground-service deadline before inspecting or recovering the connection.
         startForeground(NOTIFICATION_ID, buildNotification())
+        val state = connectionManager.state.value
+        if (state.host == null || state.phase == ConnectionPhase.DISCONNECTED) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        connectionManager.recoverIfNeeded()
         return START_STICKY
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android 15 limits background dataSync time; only a foreground return may re-enable it.
+        try {
+            connectionManager.onBackgroundServiceTimeout()
+        } finally {
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {

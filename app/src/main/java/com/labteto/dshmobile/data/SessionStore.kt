@@ -127,7 +127,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
@@ -325,7 +324,7 @@ class SessionStore @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
-    private val baselineMutex = Mutex()
+    private var baselineJob: Job? = null
     private val noCurrentGoalMessage = { context.getString(com.labteto.dshmobile.R.string.goal_none) }
     private val migrationRequiredMessage = { context.getString(com.labteto.dshmobile.R.string.alpha2_migration) }
     private val featureAvailability = FeatureAvailability { setConnectionError(it.message) }
@@ -690,17 +689,17 @@ class SessionStore @Inject constructor(
             var prev = connectionManager.state.value
             connectionManager.state.collect { state ->
                 if (prev.host?.id != state.host?.id || prev.host?.baseUrl != state.host?.baseUrl ||
+                    prev.clientId != state.clientId ||
                     (prev.phase != state.phase && (prev.phase == ConnectionPhase.CONNECTED || state.phase == ConnectionPhase.CONNECTED))) {
                     featureAvailability.reset()
                 }
                 if (prev.host?.id != state.host?.id || prev.host?.baseUrl != state.host?.baseUrl) questionSessions.reset()
                 else if (prev.phase == ConnectionPhase.CONNECTED && state.phase != ConnectionPhase.CONNECTED) questionSessions.disconnect()
-                val initialConnect = !prev.hasConnected && state.hasConnected
-                val reconnect = prev.hasConnected &&
-                    prev.phase == ConnectionPhase.RECONNECTING &&
-                    state.phase == ConnectionPhase.CONNECTED
+                val newGeneration = state.phase == ConnectionPhase.CONNECTED && state.clientId != null &&
+                    state.clientId != prev.clientId
                 prev = state
-                if (initialConnect || reconnect) {
+                if (state.phase != ConnectionPhase.CONNECTED) baselineJob?.cancel()
+                if (newGeneration) {
                     probeFeatures()
                     triggerBaseline()
                     activeHostKey?.let { pluginOperations.resume(it) }
@@ -753,14 +752,14 @@ class SessionStore @Inject constructor(
         runCatching { decodeFromJsonElement(serializer, item) }.getOrNull()
 
     private fun triggerBaseline() {
-        scope.launch {
-            if (!baselineMutex.tryLock()) return@launch
+        baselineJob?.cancel()
+        baselineJob = scope.launch {
             try {
                 baseline()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 log("baseline failed", e)
-            } finally {
-                baselineMutex.unlock()
             }
         }
     }
@@ -1659,6 +1658,7 @@ class SessionStore @Inject constructor(
             log("cannot follow $sessionId: no connection generation")
             return
         }
+        fun isCurrentFollow() = isCurrent() && muxForHost(host) === mux && mux.failure == null
         val args = buildJsonObject {
             put(
                 "request",
@@ -1680,14 +1680,14 @@ class SessionStore @Inject constructor(
                             val hydrated = hydrateSessionSnapshot(SessionAddress.Session(sessionId = sessionId), frame,
                                 HISTORY_PAGE_SIZE, api::sessionPage)
                             synchronized(lock) {
-                                if (isCurrent()) applyFollowSnapshot(sessionId, hydrated)
+                                if (isCurrentFollow()) applyFollowSnapshot(sessionId, hydrated)
                             }
                         }
                         is SessionFollowFrame.Entry -> synchronized(lock) {
-                            if (isCurrent()) applyFollowEntry(sessionId, frame.record)
+                            if (isCurrentFollow()) applyFollowEntry(sessionId, frame.record)
                         }
                         is SessionFollowFrame.AssistantStream -> synchronized(lock) {
-                            if (isCurrent()) applyAssistantFrame(sessionId, frame)
+                            if (isCurrentFollow()) applyAssistantFrame(sessionId, frame)
                         }
                         null -> log("undecodable session/follow frame")
                     }
@@ -1696,7 +1696,9 @@ class SessionStore @Inject constructor(
                 if (failure is kotlinx.coroutines.CancellationException) throw failure
                 log("session/follow ended for $sessionId", failure)
                 synchronized(lock) {
-                    if (isCurrent()) setConnectionError(failure.message)
+                    if (shouldReportFollowFailure(failure, isCurrentFollow())) {
+                        setConnectionError(failure.message)
+                    }
                 }
             }
         }
@@ -2380,6 +2382,8 @@ class SessionStore @Inject constructor(
         _subagentConversation.value = null
         val host = activeHostKey ?: return
         val mux = muxForHost(host) ?: return
+        fun isCurrentFollow() = activeHostKey == host && currentSessionId.value == sid &&
+            muxForHost(host) === mux && mux.failure == null
         val request = SessionFollowRequest(
             address = SessionAddress.Subagent(parentSessionId = sid, childSessionId = childSessionId, mode = mode),
             maxMessages = INITIAL_FOLLOW_MESSAGES, assistantStream = true,
@@ -2392,7 +2396,7 @@ class SessionStore @Inject constructor(
                 mux.openStream("session/follow", buildJsonObject {
                     put("request", encodeToJsonElement(SessionFollowRequest.serializer(), request))
                 }).collect { item ->
-                    if (activeHostKey != host || currentSessionId.value != sid) return@collect
+                    if (!isCurrentFollow()) return@collect
                     when (val frame = decodeOrNull(SessionFollowFrameSerializer, item)) {
                         is SessionFollowFrame.Snapshot -> {
                             val snapshot = hydrateSessionSnapshot(request.address, frame, HISTORY_PAGE_SIZE, api::sessionPage)
@@ -2410,10 +2414,16 @@ class SessionStore @Inject constructor(
                         is SessionFollowFrame.AssistantStream -> live.accept(frame.frame)
                         null -> Unit
                     }
-                    _subagentConversation.value = EventFold(childSessionId).fold(events.sortedBy { it.seq }, live.transientEnvelopes()).copy(hasMore = hasMore)
+                    if (isCurrentFollow()) {
+                        _subagentConversation.value = EventFold(childSessionId).fold(events.sortedBy { it.seq }, live.transientEnvelopes()).copy(hasMore = hasMore)
+                    }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (failure: Exception) { setConnectionError(failure.message) }
+            catch (failure: Exception) {
+                if (shouldReportFollowFailure(failure, isCurrentFollow())) {
+                    setConnectionError(failure.message)
+                }
+            }
         }
     }
 

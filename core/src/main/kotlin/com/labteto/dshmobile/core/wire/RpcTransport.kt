@@ -449,6 +449,10 @@ open class WsChannel(
             sink.onMessage(text)
         }
 
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            webSocket.close(code, reason)
+        }
+
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             sink.onClosed(null)
         }
