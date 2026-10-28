@@ -649,4 +649,8 @@
     <string name="history_cache_syncing">Сохранённая история · Синхронизация…</string>
     <string name="history_cache_stale">Сохранённая история · Не синхронизировано</string>
     <string name="settings_history_cache_limit">Лимит кэша</string>
+    <string name="chat_delivery_sending">Отправка…</string>
+    <string name="chat_delivery_accepted">Отправлено · Сервер получил сообщение</string>
+    <string name="chat_delivery_rejected">Сообщение отклонено</string>
+    <string name="chat_delivery_unconfirmed">Доставка не подтверждена · Проверьте беседу</string>
 </resources>

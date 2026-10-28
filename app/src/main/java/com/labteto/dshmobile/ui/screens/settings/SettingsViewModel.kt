@@ -63,6 +63,9 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val historyCacheUsage = historyCache.usage
+    private val _cacheUsageFailed = MutableStateFlow(false)
+    val cacheUsageFailed = _cacheUsageFailed.asStateFlow()
+    private val refreshingCache = java.util.concurrent.atomic.AtomicBoolean(false)
     private val _clearingCache = MutableStateFlow(false)
     val clearingCache = _clearingCache.asStateFlow()
 
@@ -81,7 +84,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun refreshCacheUsage() {
-        viewModelScope.launch { historyCache.refreshUsage() }
+        if (!refreshingCache.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                historyCache.refreshUsage()
+                _cacheUsageFailed.value = false
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _cacheUsageFailed.value = true
+            } finally { refreshingCache.set(false) }
+        }
     }
 
     fun clearHistoryCache(onDone: (Boolean) -> Unit) {

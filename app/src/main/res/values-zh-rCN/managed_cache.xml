@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">本地存储</string>
+    <string name="settings_cache_total">总计：%1$s</string>
+    <string name="settings_cache_preview">会话预览：%1$s</string>
+    <string name="settings_cache_history">完整本地历史：%1$s</string>
+    <string name="settings_cache_stream">流积压：%1$s</string>
+    <string name="settings_cache_rpc">RPC 临时文件：%1$s</string>
+    <string name="settings_cache_protected">使用中／清理时保留：%1$s</string>
+    <string name="settings_cache_preview_limit">预览缓存容量</string>
+    <string name="settings_cache_description">容量仅适用于可丢弃的预览，不限制完整历史。清理会删除离线历史、预览和未使用的临时文件，不影响远端历史、已保存主机或登录信息。正在处理的数据会保留至处理完成；少量数据库和索引文件可能保留。</string>
+    <string name="settings_cache_clear_all">清理本地存储</string>
+    <string name="settings_cache_clear_done">清理完成，使用中的文件已保留。</string>
+    <string name="settings_cache_usage_failed">无法读取本地存储用量，请重试。</string>
+    <string name="chat_load_newer">加载较新的消息</string>
+    <string name="chat_loading_newer">正在加载较新的消息…</string>
+    <string name="settings_cache_clear_confirm_title">清理本地历史？</string>
+    <string name="settings_cache_clear_confirm_body">这会删除此设备上的离线历史、会话预览和未使用的临时文件，不影响远端历史、已保存主机或登录信息。正在处理的数据会保留至处理完成。少量数据库和索引文件可能保留。</string>
+    <string name="settings_cache_clear_confirm_action">删除本地副本</string>
+</resources>

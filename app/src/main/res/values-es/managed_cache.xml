@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">Almacenamiento local</string>
+    <string name="settings_cache_total">Total: %1$s</string>
+    <string name="settings_cache_preview">Vistas previas: %1$s</string>
+    <string name="settings_cache_history">Historial local completo: %1$s</string>
+    <string name="settings_cache_stream">Datos de transmisión pendientes: %1$s</string>
+    <string name="settings_cache_rpc">Archivos temporales RPC: %1$s</string>
+    <string name="settings_cache_protected">En uso / conservados al limpiar: %1$s</string>
+    <string name="settings_cache_preview_limit">Capacidad de caché de vistas previas</string>
+    <string name="settings_cache_description">La capacidad solo limita las vistas previas, no el historial completo. La limpieza elimina el historial sin conexión, las vistas previas y los temporales inactivos. El historial remoto, los servidores y el acceso no cambian. Los datos en procesamiento se conservan hasta terminar; pueden quedar pequeños archivos de base de datos e índices.</string>
+    <string name="settings_cache_clear_all">Limpiar almacenamiento local</string>
+    <string name="settings_cache_clear_done">Limpieza completada. Se conservaron los archivos en uso.</string>
+    <string name="settings_cache_usage_failed">No se pudo leer el uso del almacenamiento local. Reinténtalo.</string>
+    <string name="chat_load_newer">Cargar mensajes posteriores</string>
+    <string name="chat_loading_newer">Cargando mensajes posteriores…</string>
+    <string name="settings_cache_clear_confirm_title">¿Borrar el historial local?</string>
+    <string name="settings_cache_clear_confirm_body">Se eliminarán de este dispositivo el historial sin conexión, las vistas previas y los temporales inactivos. No cambiarán el historial remoto, los servidores guardados ni los datos de acceso. Los datos en procesamiento se conservan hasta terminar. Pueden quedar pequeños archivos de base de datos e índices.</string>
+    <string name="settings_cache_clear_confirm_action">Eliminar copias locales</string>
+</resources>

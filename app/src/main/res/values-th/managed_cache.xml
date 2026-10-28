@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">พื้นที่จัดเก็บในเครื่อง</string>
+    <string name="settings_cache_total">ทั้งหมด: %1$s</string>
+    <string name="settings_cache_preview">ตัวอย่างการสนทนา: %1$s</string>
+    <string name="settings_cache_history">ประวัติในเครื่องทั้งหมด: %1$s</string>
+    <string name="settings_cache_stream">ข้อมูลสตรีมค้าง: %1$s</string>
+    <string name="settings_cache_rpc">ไฟล์ RPC ชั่วคราว: %1$s</string>
+    <string name="settings_cache_protected">กำลังใช้งาน / เก็บไว้ระหว่างล้าง: %1$s</string>
+    <string name="settings_cache_preview_limit">ความจุแคชตัวอย่าง</string>
+    <string name="settings_cache_description">ความจุจำกัดเฉพาะตัวอย่าง ไม่จำกัดประวัติทั้งหมด การล้างจะลบประวัติออฟไลน์ ตัวอย่าง และไฟล์ชั่วคราวที่ไม่ได้ใช้ โดยไม่เปลี่ยนประวัติระยะไกล โฮสต์ หรือข้อมูลเข้าสู่ระบบ ข้อมูลที่กำลังประมวลผลจะเก็บไว้จนเสร็จ และอาจเหลือไฟล์ฐานข้อมูลหรือดัชนีขนาดเล็ก</string>
+    <string name="settings_cache_clear_all">ล้างพื้นที่จัดเก็บในเครื่อง</string>
+    <string name="settings_cache_clear_done">ล้างเสร็จแล้ว เก็บไฟล์ที่กำลังใช้งานไว้</string>
+    <string name="settings_cache_usage_failed">อ่านการใช้พื้นที่จัดเก็บในเครื่องไม่ได้ โปรดลองอีกครั้ง</string>
+    <string name="chat_load_newer">โหลดข้อความถัดไป</string>
+    <string name="chat_loading_newer">กำลังโหลดข้อความถัดไป…</string>
+    <string name="settings_cache_clear_confirm_title">ล้างประวัติในเครื่องหรือไม่</string>
+    <string name="settings_cache_clear_confirm_body">ประวัติออฟไลน์ ตัวอย่างการสนทนา และไฟล์ชั่วคราวที่ไม่ได้ใช้จะถูกลบจากอุปกรณ์นี้ ประวัติระยะไกล โฮสต์ที่บันทึก และข้อมูลเข้าสู่ระบบจะไม่เปลี่ยน ข้อมูลที่กำลังประมวลผลจะเก็บไว้จนเสร็จ และอาจเหลือไฟล์ฐานข้อมูลหรือดัชนีขนาดเล็ก</string>
+    <string name="settings_cache_clear_confirm_action">ลบสำเนาในเครื่อง</string>
+</resources>

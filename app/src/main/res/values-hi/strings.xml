@@ -649,4 +649,8 @@
     <string name="history_cache_syncing">सहेजा इतिहास दिख रहा है · सिंक हो रहा है…</string>
     <string name="history_cache_stale">सहेजा इतिहास दिख रहा है · सिंक नहीं हुआ</string>
     <string name="settings_history_cache_limit">कैश सीमा</string>
+    <string name="chat_delivery_sending">भेजा जा रहा है…</string>
+    <string name="chat_delivery_accepted">भेज दिया गया · होस्ट को मिल गया</string>
+    <string name="chat_delivery_rejected">होस्ट ने संदेश अस्वीकार किया</string>
+    <string name="chat_delivery_unconfirmed">डिलीवरी की पुष्टि नहीं · बातचीत देखें</string>
 </resources>

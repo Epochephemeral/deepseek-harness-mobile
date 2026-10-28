@@ -649,4 +649,8 @@
     <string name="history_cache_syncing">عرض السجل المحفوظ · جارٍ التزامن…</string>
     <string name="history_cache_stale">عرض السجل المحفوظ · لم تتم المزامنة</string>
     <string name="settings_history_cache_limit">حد سعة الذاكرة المؤقتة</string>
+    <string name="chat_delivery_sending">جارٍ الإرسال…</string>
+    <string name="chat_delivery_accepted">تم الإرسال · استلمه المضيف</string>
+    <string name="chat_delivery_rejected">فشل الإرسال · رفضه المضيف</string>
+    <string name="chat_delivery_unconfirmed">لم يتأكد التسليم · تحقق من المحادثة</string>
 </resources>

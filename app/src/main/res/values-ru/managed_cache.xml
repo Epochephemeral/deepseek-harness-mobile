@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">Локальное хранилище</string>
+    <string name="settings_cache_total">Всего: %1$s</string>
+    <string name="settings_cache_preview">Предпросмотры бесед: %1$s</string>
+    <string name="settings_cache_history">Полная локальная история: %1$s</string>
+    <string name="settings_cache_stream">Очередь потока: %1$s</string>
+    <string name="settings_cache_rpc">Временные файлы RPC: %1$s</string>
+    <string name="settings_cache_protected">Используются / сохраняются при очистке: %1$s</string>
+    <string name="settings_cache_preview_limit">Размер кэша предпросмотра</string>
+    <string name="settings_cache_description">Размер ограничивает только предпросмотры, а не полную историю. Очистка удаляет офлайн-историю, предпросмотры и неиспользуемые временные файлы. Удалённая история, серверы и данные входа не меняются. Данные текущей обработки сохраняются до её завершения; небольшие файлы базы данных и индексов могут остаться.</string>
+    <string name="settings_cache_clear_all">Очистить локальное хранилище</string>
+    <string name="settings_cache_clear_done">Очистка завершена. Используемые файлы сохранены.</string>
+    <string name="settings_cache_usage_failed">Не удалось прочитать использование локального хранилища. Повторите попытку.</string>
+    <string name="chat_load_newer">Загрузить более поздние сообщения</string>
+    <string name="chat_loading_newer">Загрузка более поздних сообщений…</string>
+    <string name="settings_cache_clear_confirm_title">Очистить локальную историю?</string>
+    <string name="settings_cache_clear_confirm_body">С устройства будут удалены офлайн-история, предпросмотры бесед и неиспользуемые временные файлы. Удалённая история, сохранённые серверы и данные входа не изменятся. Данные текущей обработки сохраняются до её завершения. Небольшие файлы базы данных и индексов могут остаться.</string>
+    <string name="settings_cache_clear_confirm_action">Удалить локальные копии</string>
+</resources>

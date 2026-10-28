@@ -649,4 +649,8 @@
     <string name="history_cache_syncing">Mostrando historial guardado · Sincronizando…</string>
     <string name="history_cache_stale">Mostrando historial guardado · Sin sincronizar</string>
     <string name="settings_history_cache_limit">Límite de caché</string>
+    <string name="chat_delivery_sending">Enviando…</string>
+    <string name="chat_delivery_accepted">Enviado · Recibido por el servidor</string>
+    <string name="chat_delivery_rejected">Mensaje rechazado</string>
+    <string name="chat_delivery_unconfirmed">Entrega sin confirmar · Revisa la conversación</string>
 </resources>

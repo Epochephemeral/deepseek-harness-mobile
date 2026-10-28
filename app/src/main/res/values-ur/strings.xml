@@ -649,4 +649,8 @@
     <string name="history_cache_syncing">محفوظ تاریخ دکھائی جا رہی ہے · ہم وقت ہو رہی ہے…</string>
     <string name="history_cache_stale">محفوظ تاریخ دکھائی جا رہی ہے · ہم وقت نہیں ہوئی</string>
     <string name="settings_history_cache_limit">کیش کی حد</string>
+    <string name="chat_delivery_sending">بھیجا جا رہا ہے…</string>
+    <string name="chat_delivery_accepted">بھیج دیا گیا · میزبان کو موصول ہو گیا</string>
+    <string name="chat_delivery_rejected">میزبان نے پیغام مسترد کر دیا</string>
+    <string name="chat_delivery_unconfirmed">ترسیل کی تصدیق نہیں ہوئی · گفتگو دیکھیں</string>
 </resources>

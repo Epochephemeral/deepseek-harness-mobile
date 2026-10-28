@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">Local storage</string>
+    <string name="settings_cache_total">Total: %1$s</string>
+    <string name="settings_cache_preview">Conversation previews: %1$s</string>
+    <string name="settings_cache_history">Full local history: %1$s</string>
+    <string name="settings_cache_stream">Stream backlog: %1$s</string>
+    <string name="settings_cache_rpc">RPC temporary files: %1$s</string>
+    <string name="settings_cache_protected">In use / retained during cleanup: %1$s</string>
+    <string name="settings_cache_preview_limit">Preview-cache capacity</string>
+    <string name="settings_cache_description">The capacity applies only to disposable previews, not full history. Clear removes offline history, previews and inactive temporary files. Remote history, hosts and login details stay unchanged. Active processing data is retained until processing finishes; small database and index files may remain.</string>
+    <string name="settings_cache_clear_all">Clear local storage</string>
+    <string name="settings_cache_clear_done">Cleanup complete. In-use files were retained.</string>
+    <string name="settings_cache_usage_failed">Unable to read local storage usage. Try again.</string>
+    <string name="chat_load_newer">Load later messages</string>
+    <string name="chat_loading_newer">Loading later messages…</string>
+    <string name="settings_cache_clear_confirm_title">Clear local history?</string>
+    <string name="settings_cache_clear_confirm_body">This removes offline history, conversation previews and inactive temporary files from this device. Remote history, saved hosts and login details are not changed. Data used by ongoing processing stays until processing finishes. Small database and index files may remain.</string>
+    <string name="settings_cache_clear_confirm_action">Remove local copies</string>
+</resources>

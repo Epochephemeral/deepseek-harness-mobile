@@ -1,5 +1,7 @@
 package com.labteto.dshmobile.ui.screens.settings
 
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.isActive
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -109,6 +111,7 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
     val settings by viewModel.state.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.historyCacheUsage.collectAsStateWithLifecycle()
     val clearingCache by viewModel.clearingCache.collectAsStateWithLifecycle()
+    val cacheUsageFailed by viewModel.cacheUsageFailed.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val store = rememberSessionStore()
     val plugins by store.plugins.collectAsStateWithLifecycle()
@@ -125,9 +128,17 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
 
     val hostsCleared = stringResource(R.string.settings_forget_hosts_done)
     val sessionsCleared = stringResource(R.string.settings_clear_last_sessions_done)
-    val cacheCleared = stringResource(R.string.settings_history_cache_cleared)
+    val cacheCleared = stringResource(R.string.settings_cache_clear_done)
     val cacheClearFailed = stringResource(R.string.settings_history_cache_failed)
-    LaunchedEffect(Unit) { viewModel.refreshCacheUsage() }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, page) {
+        if (page == PAGE_SETTINGS) lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (isActive) {
+                viewModel.refreshCacheUsage()
+                kotlinx.coroutines.delay(2_000)
+            }
+        }
+    }
 
     // Fetched on open rather than kept live: the inventory only changes when the harness is
     // restarted with a different composition, and nothing pushes that over the wire.
@@ -299,7 +310,7 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
                 } else plugins?.let { PluginsCard(it) { pluginsOpen = true } }
 
                 SettingsCard(stringResource(R.string.settings_data)) {
-                    HistoryCacheSection(cacheUsage, clearingCache,
+                    HistoryCacheSection(cacheUsage, clearingCache, usageFailed = cacheUsageFailed,
                         limitBytes = settings.historyCacheLimitBytes,
                         onLimitChange = { bytes ->
                             viewModel.setHistoryCacheLimit(bytes) { ok -> if (!ok) toast.second(cacheClearFailed) }
@@ -419,28 +430,44 @@ fun SettingsScreen(onClose: () -> Unit, viewModel: SettingsViewModel = hiltViewM
     }
 }
 
-/** Local, disposable history storage, separate from remembered hosts and remote data. */
+/** Unified local storage, separate from remembered hosts and remote data. */
 @Composable
 internal fun HistoryCacheSection(
     usage: com.labteto.dshmobile.data.HistoryCacheUsage?,
     clearing: Boolean,
     limitBytes: Long = com.labteto.dshmobile.connection.DEFAULT_HISTORY_CACHE_LIMIT_BYTES,
     onLimitChange: (Long) -> Unit = {},
+    usageFailed: Boolean = false,
     onClear: () -> Unit,
 ) {
     val colors = DsTheme.colors
     val context = LocalContext.current
-    Text(stringResource(R.string.settings_history_cache), style = DsType.std14, color = colors.labelPrimary)
+    var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
+    Text(stringResource(R.string.settings_managed_cache), style = DsType.std14, color = colors.labelPrimary)
     Text(
-        usage?.let { stringResource(R.string.settings_history_cache_usage,
+        usage?.let { stringResource(R.string.settings_cache_total,
             android.text.format.Formatter.formatFileSize(context, it.bytes)) }
             ?: stringResource(R.string.common_loading),
         style = DsType.small13,
         color = colors.labelSecondary,
     )
+    if (usageFailed) Text(stringResource(R.string.settings_cache_usage_failed),
+        style = DsType.small13, color = colors.labelSecondary)
+    usage?.let { current ->
+        listOf(
+            R.string.settings_cache_preview to current.previewBytes,
+            R.string.settings_cache_history to current.historyBytes,
+            R.string.settings_cache_stream to current.backlogBytes,
+            R.string.settings_cache_rpc to current.rpcBytes,
+            R.string.settings_cache_protected to current.protectedBytes,
+        ).forEach { (label, bytes) ->
+            Text(stringResource(label, android.text.format.Formatter.formatFileSize(context, bytes)),
+                style = DsType.small13, color = colors.labelSecondary)
+        }
+    }
     Row(Modifier.fillMaxWidth().heightIn(min = DsSpacing.touchTarget),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.settings_history_cache_limit), Modifier.weight(1f),
+        Text(stringResource(R.string.settings_cache_preview_limit), Modifier.weight(1f),
             style = DsType.std14, color = colors.labelSecondary)
         DsMenu(
             anchor = {
@@ -457,16 +484,48 @@ internal fun HistoryCacheSection(
             },
         )
     }
-    Text(stringResource(R.string.settings_history_cache_description),
+    Text(stringResource(R.string.settings_cache_description),
         style = DsType.small13, color = colors.labelSecondary)
     DsButton(
-        text = stringResource(if (clearing) R.string.settings_history_cache_clearing else R.string.settings_history_cache_clear),
-        onClick = onClear,
+        text = stringResource(if (clearing) R.string.settings_history_cache_clearing else R.string.settings_cache_clear_all),
+        onClick = { showClearConfirmation = true },
         enabled = !clearing && (usage?.bytes ?: 0) > 0,
         variant = DsButtonVariant.Outline,
         modifier = Modifier.fillMaxWidth(),
         allowWrap = true,
     )
+    if (showClearConfirmation) {
+        // Scroll the complete confirmation (including both actions) at large font scales and in
+        // landscape. Reuse the native dialog surface/tokens, without clipping destructive actions.
+        DsDialog(title = null, onDismiss = { showClearConfirmation = false }) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .heightIn(max = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.7f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(DsSpacing.medium),
+            ) {
+                Text(stringResource(R.string.settings_cache_clear_confirm_title),
+                    style = DsType.large20, color = colors.labelPrimary)
+                Text(stringResource(R.string.settings_cache_clear_confirm_body),
+                    style = DsType.std14, color = colors.labelSecondary)
+                DsButton(
+                    text = stringResource(R.string.settings_cache_clear_confirm_action),
+                    onClick = { showClearConfirmation = false; onClear() },
+                    enabled = !clearing,
+                    variant = DsButtonVariant.Danger,
+                    modifier = Modifier.fillMaxWidth(),
+                    allowWrap = true,
+                )
+                DsButton(
+                    text = stringResource(R.string.common_cancel),
+                    onClick = { showClearConfirmation = false },
+                    variant = DsButtonVariant.Ghost,
+                    modifier = Modifier.fillMaxWidth(),
+                    allowWrap = true,
+                )
+            }
+        }
+    }
 }
 
 /** One settings group as a raised card, so groups read as blocks rather than a running list. */

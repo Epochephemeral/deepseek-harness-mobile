@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">التخزين المحلي</string>
+    <string name="settings_cache_total">الإجمالي: %1$s</string>
+    <string name="settings_cache_preview">معاينات المحادثات: %1$s</string>
+    <string name="settings_cache_history">السجل المحلي الكامل: %1$s</string>
+    <string name="settings_cache_stream">البيانات المتراكمة للبث: %1$s</string>
+    <string name="settings_cache_rpc">ملفات RPC المؤقتة: %1$s</string>
+    <string name="settings_cache_protected">قيد الاستخدام / محفوظة أثناء التنظيف: %1$s</string>
+    <string name="settings_cache_preview_limit">سعة ذاكرة المعاينات</string>
+    <string name="settings_cache_description">تنطبق السعة على المعاينات القابلة للحذف فقط، وليس السجل الكامل. يحذف التنظيف السجل غير المتصل والمعاينات والملفات المؤقتة غير المستخدمة دون تغيير السجل البعيد أو المضيفين أو بيانات الدخول. تُحفظ بيانات المعالجة الجارية حتى اكتمالها؛ قد تبقى ملفات صغيرة لقاعدة البيانات والفهرس.</string>
+    <string name="settings_cache_clear_all">تنظيف التخزين المحلي</string>
+    <string name="settings_cache_clear_done">اكتمل التنظيف. تم الاحتفاظ بالملفات المستخدمة.</string>
+    <string name="settings_cache_usage_failed">تعذرت قراءة استخدام التخزين المحلي. حاول مجددًا.</string>
+    <string name="chat_load_newer">تحميل الرسائل الأحدث</string>
+    <string name="chat_loading_newer">جارٍ تحميل الرسائل الأحدث…</string>
+    <string name="settings_cache_clear_confirm_title">حذف السجل المحلي؟</string>
+    <string name="settings_cache_clear_confirm_body">سيُحذف السجل غير المتصل ومعاينات المحادثات والملفات المؤقتة غير المستخدمة من هذا الجهاز. لن يتغير السجل البعيد أو المضيفون المحفوظون أو بيانات الدخول. تبقى بيانات المعالجة الجارية حتى اكتمالها. قد تبقى ملفات صغيرة لقاعدة البيانات والفهرس.</string>
+    <string name="settings_cache_clear_confirm_action">حذف النسخ المحلية</string>
+</resources>

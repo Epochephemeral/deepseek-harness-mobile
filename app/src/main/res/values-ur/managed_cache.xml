@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">مقامی اسٹوریج</string>
+    <string name="settings_cache_total">کل: %1$s</string>
+    <string name="settings_cache_preview">گفتگو کے پیش نظارے: %1$s</string>
+    <string name="settings_cache_history">مکمل مقامی تاریخ: %1$s</string>
+    <string name="settings_cache_stream">اسٹریم کا زیر التوا ڈیٹا: %1$s</string>
+    <string name="settings_cache_rpc">RPC کی عارضی فائلیں: %1$s</string>
+    <string name="settings_cache_protected">زیر استعمال / صفائی میں محفوظ: %1$s</string>
+    <string name="settings_cache_preview_limit">پیش نظارہ کیش کی گنجائش</string>
+    <string name="settings_cache_description">گنجائش صرف پیش نظاروں پر لاگو ہے، مکمل تاریخ پر نہیں۔ صفائی آف لائن تاریخ، پیش نظارے اور غیر استعمال شدہ عارضی فائلیں ہٹاتی ہے۔ دور کی تاریخ، میزبان اور لاگ ان نہیں بدلتے۔ جاری کارروائی کا ڈیٹا مکمل ہونے تک رکھا جاتا ہے؛ چھوٹی ڈیٹابیس اور اشاریہ فائلیں رہ سکتی ہیں۔</string>
+    <string name="settings_cache_clear_all">مقامی اسٹوریج صاف کریں</string>
+    <string name="settings_cache_clear_done">صفائی مکمل۔ زیر استعمال فائلیں محفوظ رکھی گئیں۔</string>
+    <string name="settings_cache_usage_failed">مقامی اسٹوریج کا استعمال پڑھا نہیں جا سکا۔ دوبارہ کوشش کریں۔</string>
+    <string name="chat_load_newer">بعد کے پیغامات لوڈ کریں</string>
+    <string name="chat_loading_newer">بعد کے پیغامات لوڈ ہو رہے ہیں…</string>
+    <string name="settings_cache_clear_confirm_title">مقامی تاریخ صاف کریں؟</string>
+    <string name="settings_cache_clear_confirm_body">اس آلے سے آف لائن تاریخ، گفتگو کے پیش نظارے اور غیر استعمال شدہ عارضی فائلیں ہٹ جائیں گی۔ دور کی تاریخ، محفوظ میزبان اور لاگ ان نہیں بدلیں گے۔ جاری کارروائی کا ڈیٹا مکمل ہونے تک رکھا جائے گا۔ چھوٹی ڈیٹابیس اور اشاریہ فائلیں رہ سکتی ہیں۔</string>
+    <string name="settings_cache_clear_confirm_action">مقامی نقول ہٹائیں</string>
+</resources>

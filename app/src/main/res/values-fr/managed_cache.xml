@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">Stockage local</string>
+    <string name="settings_cache_total">Total : %1$s</string>
+    <string name="settings_cache_preview">Aperçus des conversations : %1$s</string>
+    <string name="settings_cache_history">Historique local complet : %1$s</string>
+    <string name="settings_cache_stream">Données de flux en attente : %1$s</string>
+    <string name="settings_cache_rpc">Fichiers temporaires RPC : %1$s</string>
+    <string name="settings_cache_protected">En cours d’utilisation / conservés au nettoyage : %1$s</string>
+    <string name="settings_cache_preview_limit">Capacité du cache des aperçus</string>
+    <string name="settings_cache_description">La capacité ne limite que les aperçus, pas l’historique complet. Le nettoyage supprime l’historique hors ligne, les aperçus et les fichiers temporaires inactifs. L’historique distant, les hôtes et les identifiants restent inchangés. Les données en cours de traitement sont conservées jusqu’à la fin ; de petits fichiers de base de données et d’index peuvent rester.</string>
+    <string name="settings_cache_clear_all">Nettoyer le stockage local</string>
+    <string name="settings_cache_clear_done">Nettoyage terminé. Les fichiers utilisés ont été conservés.</string>
+    <string name="settings_cache_usage_failed">Impossible de lire l’utilisation du stockage local. Réessayez.</string>
+    <string name="chat_load_newer">Charger les messages suivants</string>
+    <string name="chat_loading_newer">Chargement des messages suivants…</string>
+    <string name="settings_cache_clear_confirm_title">Effacer l’historique local ?</string>
+    <string name="settings_cache_clear_confirm_body">L’historique hors ligne, les aperçus et les fichiers temporaires inactifs seront supprimés de cet appareil. L’historique distant, les hôtes enregistrés et les identifiants restent inchangés. Les données en cours de traitement sont conservées jusqu’à la fin. De petits fichiers de base de données et d’index peuvent rester.</string>
+    <string name="settings_cache_clear_confirm_action">Supprimer les copies locales</string>
+</resources>

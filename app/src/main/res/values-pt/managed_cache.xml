@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">Armazenamento local</string>
+    <string name="settings_cache_total">Total: %1$s</string>
+    <string name="settings_cache_preview">Prévias de conversas: %1$s</string>
+    <string name="settings_cache_history">Histórico local completo: %1$s</string>
+    <string name="settings_cache_stream">Dados de fluxo pendentes: %1$s</string>
+    <string name="settings_cache_rpc">Arquivos temporários RPC: %1$s</string>
+    <string name="settings_cache_protected">Em uso / mantidos na limpeza: %1$s</string>
+    <string name="settings_cache_preview_limit">Capacidade do cache de prévias</string>
+    <string name="settings_cache_description">A capacidade limita apenas as prévias, não o histórico completo. A limpeza remove o histórico offline, as prévias e os temporários inativos. O histórico remoto, os servidores e o login não mudam. Os dados em processamento são mantidos até terminar; pequenos arquivos de banco de dados e índices podem permanecer.</string>
+    <string name="settings_cache_clear_all">Limpar armazenamento local</string>
+    <string name="settings_cache_clear_done">Limpeza concluída. Arquivos em uso foram mantidos.</string>
+    <string name="settings_cache_usage_failed">Não foi possível ler o uso do armazenamento local. Tente novamente.</string>
+    <string name="chat_load_newer">Carregar mensagens posteriores</string>
+    <string name="chat_loading_newer">Carregando mensagens posteriores…</string>
+    <string name="settings_cache_clear_confirm_title">Limpar o histórico local?</string>
+    <string name="settings_cache_clear_confirm_body">O histórico offline, as prévias e os temporários inativos serão removidos deste dispositivo. O histórico remoto, os servidores salvos e o login não mudam. Dados em processamento são mantidos até terminar. Pequenos arquivos de banco de dados e índices podem permanecer.</string>
+    <string name="settings_cache_clear_confirm_action">Remover cópias locais</string>
+</resources>

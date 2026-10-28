@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_managed_cache">स्थानीय स्टोरेज</string>
+    <string name="settings_cache_total">कुल: %1$s</string>
+    <string name="settings_cache_preview">बातचीत के प्रीव्यू: %1$s</string>
+    <string name="settings_cache_history">पूरा स्थानीय इतिहास: %1$s</string>
+    <string name="settings_cache_stream">स्ट्रीम का लंबित डेटा: %1$s</string>
+    <string name="settings_cache_rpc">RPC की अस्थायी फ़ाइलें: %1$s</string>
+    <string name="settings_cache_protected">उपयोग में / सफ़ाई में रखी जाएँगी: %1$s</string>
+    <string name="settings_cache_preview_limit">प्रीव्यू कैश की क्षमता</string>
+    <string name="settings_cache_description">क्षमता केवल प्रीव्यू पर लागू है, पूरे इतिहास पर नहीं। सफ़ाई ऑफलाइन इतिहास, प्रीव्यू और निष्क्रिय अस्थायी फ़ाइलें हटाती है। दूरस्थ इतिहास, होस्ट और लॉगिन नहीं बदलते। चल रहे प्रसंस्करण का डेटा पूरा होने तक रखा जाता है; छोटी डेटाबेस और इंडेक्स फ़ाइलें रह सकती हैं।</string>
+    <string name="settings_cache_clear_all">स्थानीय स्टोरेज साफ़ करें</string>
+    <string name="settings_cache_clear_done">सफ़ाई पूरी हुई। उपयोग में फ़ाइलें रखी गई हैं।</string>
+    <string name="settings_cache_usage_failed">स्थानीय स्टोरेज का उपयोग पढ़ा नहीं जा सका। फिर प्रयास करें।</string>
+    <string name="chat_load_newer">बाद के संदेश लोड करें</string>
+    <string name="chat_loading_newer">बाद के संदेश लोड हो रहे हैं…</string>
+    <string name="settings_cache_clear_confirm_title">स्थानीय इतिहास मिटाएँ?</string>
+    <string name="settings_cache_clear_confirm_body">इस डिवाइस से ऑफलाइन इतिहास, बातचीत के प्रीव्यू और निष्क्रिय अस्थायी फ़ाइलें हटेंगी। दूरस्थ इतिहास, सहेजे गए होस्ट और लॉगिन नहीं बदलेंगे। चल रहे प्रसंस्करण का डेटा पूरा होने तक रहेगा। छोटी डेटाबेस और इंडेक्स फ़ाइलें रह सकती हैं।</string>
+    <string name="settings_cache_clear_confirm_action">स्थानीय प्रतियाँ हटाएँ</string>
+</resources>
