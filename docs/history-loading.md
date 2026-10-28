@@ -35,18 +35,87 @@ payload reduction.
 
 ## Turn directory and direct navigation
 
-The history picker uses the host's `turnOutline` projection when available. This is
-an outline of the whole log, independent of the currently loaded transcript window.
-A turn is a runtime `turn/start` boundary, not each assistant step. Picking an old
-turn seeks its indexed disk window or fetches a small region near that sequence;
-it does not accumulate every page between that turn and the live tail. The normal
-RAM window budgets remain in force. The UI resolves the start to a visible row
-before dismissing the picker; failures remain retryable instead of jumping to latest.
-Older hosts without this projection retain the loaded-message history fallback.
+The history picker uses the host's `turnOutline` projection when available. A turn
+starts at `turn/start`, not at every assistant step or user steering message. The
+same parser supplies the picker and the loader's boundaries.
+
+An older action completes a partially loaded first turn, or prepends the preceding
+whole turn when already aligned. A newer action completes the turn containing the
+next missing record. A long turn can require several bounded HTTP requests; those
+requests are not separate display pages. Without a valid outline, the reader finds
+actual turn lifecycle boundaries in fetched records, not a tool-count threshold.
+
+Loaded content stays in the transcript. Ordinary paging, live entries, tab/modal
+return and reconnect do not replace it with a shorter window. Both endpoints and
+the user's visible key/offset are independent of the transfer batch size. Hidden
+records still advance coverage, and a scan retains the intervening tool activity.
+
+The current reader retains one contiguous loaded interval. Selecting a distant
+turn or returning to an uncached latest tail therefore fills the missing interval
+before completing the jump. It does **not** promise constant-time distant seeking.
+Cancellation/failure keeps the previous content and position; it never presents a
+silent gap as continuous history. A future sparse-range/payload virtualization
+change must explicitly represent gaps without dropping already loaded content.
 
 Manual acceptance: open History in a long session, choose an early turn, then choose
 a recent turn and return to latest. Check that the directory retains early entries
 and the selected prompt is readable without manually scrolling through all steps.
+
+## Ownership and resource contract
+
+Four different facts have different owners:
+
+| Fact | Owner and lifetime |
+| --- | --- |
+| Selected host/session and connection authority | `SessionStore`; its selection epoch changes on actual selection changes, not on reconnect |
+| Loaded raw coverage and read operations | `SessionHistoryReader`; one follow generation and one cancellable navigation operation |
+| Archived reader records | `HistoryCache` / SQLite; explicit clear invalidates cache tickets, not the already displayed public text |
+| Materialized public content | `ReaderTurnTimeline`; immutable turn blocks, released when the selected session closes |
+| Physical position, modal/tab transitions and disclosure | `HistoryReadingState`; a cancellable UI owner, with scalar bookmarks rather than saved history windows |
+
+The active reader does not retain `reader/skip` envelopes, a raw journal copy and an
+effective-surface copy alongside its public nodes. Coverage is stored explicitly.
+New records use the shared event parser; completed unaffected turn blocks are reused.
+A live append does not reparse all previous JSON or refold completed earlier turns.
+Transient assistant settlement uses compact identities rather than needing the raw
+journal. Explicit raw-detail expansion reads the reduced archive on demand and
+releases those records when collapsed.
+
+These are **not** fixed total-memory guarantees. Public text and lightweight node
+metadata grow with the content the user has loaded. Exact addition reads can also
+materialize a large turn temporarily. The 128-row / 256-KiB targets bound individual
+transport batches, not the whole transcript or an indivisible public record. Lazy
+message/tool child composition bounds on-screen rendering, not retained public text.
+Do not restore a small-window eviction policy to hide resource growth.
+
+Scale regressions cover 8,224 positions and 100,000 skip positions. They assert
+retained representation and incremental work, not a universal heap-byte limit or
+real-phone frame-rate guarantee. If public-text-heavy sessions show unacceptable
+heap/latency growth, the next change is disk-backed public-payload virtualization
+behind this coverage/materialization boundary, not a larger magic event cap.
+
+Read ownership gates both success and failure. Host reads bind host plus API
+identity; session reads also bind selection epoch, rejecting A→B→A late replies.
+Search/permission refresh ordering additionally retires older queries. Reader and
+host-stream errors have separate owners, so an unrelated successful operation
+cannot clear them. Host control/workspace streams retry a bounded number of times
+while their mux remains alive; carrier recovery belongs to the connection manager.
+
+The main reader requires reader-v1. Legacy raw/chunk decoding and raw subagent
+history remain separate compatibility paths; this change does not claim to retire
+those formats. Unreachable main-reader trimming and message-count paging helpers
+have been removed rather than kept as unused compatibility switches.
+
+### Observed scale sample (2026-10-28)
+
+On the local Android-15/API-35 ARM64 emulator, the synthetic reduced-reader fixture
+held 8,224 sequence positions, 864,985 archived payload bytes and 2,347 public/control
+nodes. Exact SQLite range decode took 120 ms; initial public-block materialization
+13 ms. Across 100 subsequent lightweight public appends, median materializer time
+was 348 µs and p95 was 591 µs. The equivalent raw full-fold baseline took 11 ms once.
+These are local component timings, not end-to-end frame latency, a heap measurement
+or a physical-phone guarantee. The raw comparison and compact view coexist in this
+measurement test, so its process memory must not be reported as reader-only usage.
 
 ## Build and checks
 
@@ -56,6 +125,53 @@ components when their licenses have already been accepted.
 ```sh
 ./gradlew :core:test :mock-harness:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
+
+With an API-35 emulator/device connected, run the same account-free reader gate as CI:
+
+```sh
+bash scripts/test-reader.sh --console=plain
+```
+
+The [shared test command](../scripts/test-reader.sh) runs protocol/unit tests plus real
+SQLite, reader ownership, continuous-scroll, restoration, disclosure and raw-detail
+instrumentation. The [CI workflow](../.github/workflows/ci.yml) has a separate API-35
+emulator job and uploads reports even on failure. It does not require a personal
+account, an LLM provider or access to a production session.
+
+This is the **client** reader gate. The official pinned harness conformance job is
+still a separate upstream compatibility check, not evidence for the custom reader.
+
+The opt-in [reader host workflow](../.github/workflows/reader-host-contract.yml) accepts
+an immutable Desktop commit via manual dispatch or a reusable-workflow call. It
+requires Desktop's reader packaging to be enabled, verifies its owned provenance
+and package tests, then runs the mobile consumer against a disposable real host.
+The [host conformance test](../conformance/src/test/kotlin/com/labteto/dshmobile/conformance/ReaderHostConformanceTest.kt)
+uses real HTTP and mux streams, seeds raw test sentinels as a positive control, and
+checks reader acknowledgement, filtering, coverage and batch bounds without an LLM.
+Missing artifacts, an unpatched host and a skipped test cannot produce a green gate.
+
+Local real-host verification on 2026-10-28 passed: one executed test, zero skips,
+failures or errors. It used the installed rc.2 runtime plus the verified
+`0.2.1-rc.2.reader.1` controller through a temporary test-only module redirect. The
+fixture created its own home, storage, workspace and random-port host; it did not
+modify or deploy the running Desktop/profile. This verifies the current overlay's
+consumer contract, not rc.3 packaging. For an integrated runtime, the reproducible
+entry is:
+
+```sh
+DSH_READER_CONFORMANCE=true \
+DSH_HARNESS_CLI=/path/to/verified/runtime/cli-entry.js \
+DSH_HARNESS_RUNTIME_ROOT=/path/to/verified/runtime \
+DSH_READER_RESOLVER=/path/to/verified/runtime/package.json \
+./gradlew :conformance:test --tests '*ReaderHostConformanceTest' --rerun-tasks
+```
+
+This workflow is not an every-PR or already-passed GitHub claim. The current Desktop
+checkout explicitly leaves default packaging integration pending; such a commit
+fails the preflight rather than silently testing the official host. The
+[Desktop-owned integration boundary](../integrations/dsh-reader/README.md) still
+applies. A release also needs physical-phone acceptance; emulator/contract results
+do not imply that. Do not copy the host patch into this repository to make CI green.
 
 The debug application is `DSH Mobile Local`, version-suffixed `-local`, with package
 `com.labteto.dshmobile.debug`. It installs alongside the signed release app and

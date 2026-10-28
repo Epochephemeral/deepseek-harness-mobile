@@ -76,7 +76,19 @@ class HarnessProcess private constructor(
          * the reason printed once — that is a setup problem worth saying out loud, because the
          * failure it would otherwise cause looks like a protocol fault.
          */
+        /** Explicit installed CLI mode; never substitute the official source checkout on failure. */
+        fun builtCli(): File? = System.getenv("DSH_HARNESS_CLI")?.takeIf { it.isNotBlank() }?.let {
+            File(it).canonicalFile.also { cli -> check(cli.isFile && cli.extension in listOf("js", "mjs", "cjs")) {
+                "DSH_HARNESS_CLI must name an installed JavaScript CLI entry: $it"
+            } }
+        }
+
         fun checkout(): File? {
+            builtCli()?.let {
+                return File(requireNotNull(System.getenv("DSH_HARNESS_RUNTIME_ROOT")) {
+                    "DSH_HARNESS_RUNTIME_ROOT is required with DSH_HARNESS_CLI"
+                }).canonicalFile.also { root -> check(root.isDirectory) { "missing runtime root: $root" } }
+            }
             // An explicitly named checkout is authoritative: if someone sets DSH_HARNESS_SRC and it
             // is wrong, they want to hear that, not to have a different harness quietly substituted
             // and a green result that says nothing about the one they meant.
@@ -141,7 +153,8 @@ class HarnessProcess private constructor(
          * @param model a scriptable model server to point the harness at, or null to leave it with
          *   a fake key and no base URL — enough to boot and serve, but not to run a turn.
          */
-        fun start(model: MockModel? = null, patch: String? = null, tls: Boolean = false): HarnessProcess {
+        fun start(model: MockModel? = null, patch: String? = null, tls: Boolean = false,
+            prepareHome: ((home: File, workspace: File) -> String?)? = null): HarnessProcess {
             val root = requireNotNull(checkout()) { "no harness checkout; call available() first" }
             val node = requireNotNull(node()) { "node is not on PATH" }
             val port = freePort()
@@ -164,18 +177,23 @@ class HarnessProcess private constructor(
             }
 
             // Title generation shares the model provider and would consume the turn's scripted reply.
+            val fixturePatch = try { prepareHome?.invoke(home, workspace) } catch (failure: Exception) {
+                home.deleteRecursively(); workspace.deleteRecursively(); throw failure
+            }
             val patches = listOfNotNull(
                 if (model != null) "[{\"id\":\"session-title-llm\",\"disabled\":true}]" else null,
                 patch,
+                fixturePatch,
             )
             val patchArgs = patches.flatMapIndexed { index, text ->
                 val file = File(home, "conformance-$index.patch.yml").apply { writeText(text) }
                 listOf("--patch", file.absolutePath)
             }
-            val command = listOf(
-                node, "--import", tsxLoaderHref(root, node),
-                File(root, CLI_ENTRY).absolutePath,
-            ) + patchArgs + listOf("--profile", "web", "--no-open", "--port", port.toString()) + tlsArgs
+            val entry = builtCli()
+            check(entry == null || (model == null && !tls)) { "Installed CLI fixture supports no-model, non-TLS runs only" }
+            val launcher = if (entry != null) listOf(node, entry.absolutePath) else listOf(
+                node, "--import", tsxLoaderHref(root, node), File(root, CLI_ENTRY).absolutePath)
+            val command = launcher + patchArgs + listOf("--profile", "web", "--no-open", "--port", port.toString()) + tlsArgs
             val builder = ProcessBuilder(command)
                 .directory(workspace)
                 .redirectErrorStream(true)
@@ -183,6 +201,11 @@ class HarnessProcess private constructor(
                 // Anything that looks like a credential belongs to the developer, not to a harness
                 // this test is about to point at a mock server.
                 keys.removeAll { it.contains(Regex("(?i)KEY|SECRET|TOKEN|PASSWORD")) }
+                if (entry != null) {
+                    // Never inherit a developer's active Desktop profile/overlay into the fixture.
+                    keys.removeAll { it.startsWith("DSH_") }
+                    remove("NODE_OPTIONS"); remove("NODE_PATH")
+                }
                 put("DSH_HOME", home.absolutePath)
                 put("DSH_AGENTS_HOME", File(home, "agents").absolutePath)
                 put("DSH_TELEMETRY_DISABLED", "1")
@@ -196,6 +219,7 @@ class HarnessProcess private constructor(
                 put("TSX_TSCONFIG_PATH", File(root, "tsconfig.json").absolutePath)
                 put("DEEPSEEK_API_KEY", model?.apiKey ?: "conformance-no-model")
                 if (model != null) put("DEEPSEEK_BASE_URL", model.baseUrl)
+                else if (entry != null) put("DEEPSEEK_BASE_URL", "http://127.0.0.1:1")
             }
 
             val process = builder.start()

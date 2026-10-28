@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">Échange %1$d</string>
+    <string name="history_turn_no_prompt">Aucun aperçu de la demande</string>
+    <string name="history_turn_loading">Chargement de l’échange…</string>
+    <string name="history_turn_failed">Impossible d’ouvrir cet échange. Appuyez pour réessayer.</string>
+    <string name="history_window_empty">Aucune demande dans la partie chargée. Chargez des messages plus anciens ou plus récents pour en voir davantage.</string>
+    <string name="reader_tool_result">Résultat de l’outil</string>
+    <string name="reader_tool_running">En cours d’exécution</string>
+    <string name="reader_tool_done">Terminé</string>
+    <string name="reader_tool_error">Erreur</string>
+    <string name="reader_tool_unknown">Statut indisponible</string>
+    <string name="reader_task_pending">En attente</string>
+    <string name="reader_task_running">En cours</string>
+    <string name="reader_task_done">Terminée</string>
+    <string name="reader_image_reference">Image jointe</string>
+    <string name="reader_image_preview">Appuyez pour charger l’aperçu</string>
+    <string name="chatlist_refresh">Actualiser la liste des sessions</string>
+    <string name="chatlist_refreshing">Actualisation de la liste des sessions…</string>
+    <string name="chatlist_refresh_failed">Impossible d’actualiser. Vérifiez votre connexion et réessayez.</string>
+    <string name="chat_zen_enter">Activer le mode zen</string>
+    <string name="chat_zen_exit">Quitter le mode zen</string>
+    <string name="chat_zen_menu">Options de discussion</string>
+    <string name="chat_zen_permissions">Autorisations</string>
+</resources>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">دور %1$d</string>
+    <string name="history_turn_no_prompt">درخواست کا پیش منظر دستیاب نہیں</string>
+    <string name="history_turn_loading">گفتگو کا دور لوڈ ہو رہا ہے…</string>
+    <string name="history_turn_failed">گفتگو کا یہ دور نہیں کھل سکا۔ دوبارہ کوشش کے لیے ٹیپ کریں۔</string>
+    <string name="history_window_empty">لوڈ کیے گئے حصے میں کوئی درخواست نہیں ہے۔ مزید دیکھنے کے لیے پرانے یا نئے پیغامات لوڈ کریں۔</string>
+    <string name="reader_tool_result">ٹول کا نتیجہ</string>
+    <string name="reader_tool_running">چل رہا ہے</string>
+    <string name="reader_tool_done">مکمل</string>
+    <string name="reader_tool_error">خرابی</string>
+    <string name="reader_tool_unknown">حیثیت دستیاب نہیں</string>
+    <string name="reader_task_pending">زیرِ التوا</string>
+    <string name="reader_task_running">جاری ہے</string>
+    <string name="reader_task_done">مکمل ہو گیا</string>
+    <string name="reader_image_reference">منسلک تصویر</string>
+    <string name="reader_image_preview">پیش منظر لوڈ کرنے کے لیے ٹیپ کریں</string>
+    <string name="chatlist_refresh">سیشن کی فہرست ریفریش کریں</string>
+    <string name="chatlist_refreshing">سیشن کی فہرست ریفریش ہو رہی ہے…</string>
+    <string name="chatlist_refresh_failed">ریفریش نہیں ہو سکا۔ اپنا کنکشن چیک کر کے دوبارہ کوشش کریں۔</string>
+    <string name="chat_zen_enter">زین موڈ میں جائیں</string>
+    <string name="chat_zen_exit">زین موڈ سے نکلیں</string>
+    <string name="chat_zen_menu">چیٹ کے اختیارات</string>
+    <string name="chat_zen_permissions">اجازتیں</string>
+</resources>

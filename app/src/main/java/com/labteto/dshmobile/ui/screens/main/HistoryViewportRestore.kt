@@ -25,11 +25,14 @@ internal data class HistoryViewportRestoreRequest(
 internal fun historyRestoreWindowReady(conversation: ConversationSnapshot?, keys: List<Any>, request: HistoryViewportRestoreRequest): Boolean {
     if (request.expectedSessionId == null) return true
     if (conversation?.sessionId != request.expectedSessionId) return false
-    val first = conversation.journal.firstOrNull()?.seq ?: conversation.nodes.firstOrNull()?.seq
-    val last = conversation.journal.lastOrNull()?.seq ?: conversation.nodes.lastOrNull()?.seq
+    val first = conversation.loadedFromSeq ?: conversation.journal.firstOrNull()?.seq ?: conversation.nodes.firstOrNull()?.seq
+    val last = conversation.loadedThroughSeq ?: conversation.journal.lastOrNull()?.seq ?: conversation.nodes.lastOrNull()?.seq
     val expectedLast = request.expectedLastSeq ?: return true
     if (last == null || last < expectedLast) return false
-    return (first == request.expectedFirstSeq) || keys.contains(request.position.key) ||
+    // Explicit reads may have prepended more history while this restore was queued. The store's
+    // loaded range is contiguous; a superset is ready, not a different window to wait forever on.
+    val containsExpectedRange = request.expectedFirstSeq?.let { first != null && first <= it } ?: true
+    return containsExpectedRange || keys.contains(request.position.key) ||
         (request.position.atTail && !conversation.hasNewer)
 }
 
@@ -52,6 +55,7 @@ internal fun historySequenceOfKey(key: Any?, streamingSeq: Long? = null): Long? 
     is Long -> key
     is String -> when {
         key == "streaming-tail" -> streamingSeq
+        key.startsWith("tool-call-") -> key.removePrefix("tool-call-").toLongOrNull()
         key.startsWith("n-") -> key.removePrefix("n-").toLongOrNull()
         key.startsWith("raw-") -> key.removePrefix("raw-").toLongOrNull()
         else -> null
@@ -68,13 +72,21 @@ internal fun captureHistoryReadingPosition(
     val visible = listState.layoutInfo.visibleItemsInfo
     // visibleItemsInfo may include a preceding item in content padding. The offset belongs to the
     // firstVisibleItemIndex, so it must be paired with that exact item's key.
-    val key = visible.firstOrNull { it.index == listState.firstVisibleItemIndex }?.key
+    val firstItem = visible.firstOrNull { it.index == listState.firstVisibleItemIndex }
+    // Paging controls are not reading anchors: appending under a visible newer control must keep
+    // the old message in place, not the control followed by a whole newly inserted page.
+    val item = if (firstItem?.key == "load-newer" || firstItem?.key == "load-older") {
+        visible.firstOrNull { historySequenceOfKey(it.key, streamingSeq) != null } ?: firstItem
+    } else firstItem
+    val key = item?.key
+    val scrollOffset = if (item != null && item.index != listState.firstVisibleItemIndex) -item.offset
+        else listState.firstVisibleItemScrollOffset
     val anchor = historySequenceOfKey(key, streamingSeq) ?:
         visible.firstNotNullOfOrNull { historySequenceOfKey(it.key, streamingSeq) }
     val atTail = !hasNewer && if (reverseLayout) {
         listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
     } else !listState.canScrollForward
-    return HistoryReadingPosition(key, listState.firstVisibleItemScrollOffset, anchor, atTail,
+    return HistoryReadingPosition(key, scrollOffset, anchor, atTail,
         rawExpanded = visible.any { (it.key as? String)?.startsWith("raw-") == true && it.key != "raw-header" })
 }
 

@@ -3,11 +3,7 @@ package com.labteto.dshmobile.ui.screens.main
 import com.labteto.dshmobile.core.session.ChatNode
 import com.labteto.dshmobile.core.session.TurnStartNode
 import com.labteto.dshmobile.core.session.UserMessageNode
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.longOrNull
 
 /** Stable picker identity; an outline entry targets a boundary, not an invisible transcript row. */
 internal data class HistoryEntry(
@@ -22,26 +18,11 @@ internal data class HistoryEntry(
     val promptLoaded: Boolean = true,
 )
 
-internal data class HistoryTurn(val turn: Long, val seq: Long, val prompt: String, val response: String)
+internal typealias HistoryTurn = com.labteto.dshmobile.core.session.TurnOutlineEntry
 
-/** The host's wire view is an array (the internal {turns,draft} state is never sent). */
-internal fun parseTurnOutline(value: JsonElement?): List<HistoryTurn>? {
-    val array = value as? JsonArray ?: return null
-    val turns = ArrayList<HistoryTurn>(array.size)
-    for (item in array) {
-        val obj = item as? JsonObject ?: return null
-        fun number(key: String) = (obj[key] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull?.takeIf { it >= 0 }
-        fun text(key: String) = (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-        val turn = number("turn") ?: return null
-        val seq = number("seq") ?: return null
-        val prompt = text("prompt") ?: return null
-        val response = text("response") ?: return null
-        // Reject ambiguous boundaries rather than silently offering a partial or incorrect directory.
-        if (turns.lastOrNull()?.let { turn <= it.turn || seq <= it.seq } == true) return null
-        turns += HistoryTurn(turn, seq, prompt, response)
-    }
-    return turns
-}
+/** Share exact boundaries with the loader; directory navigation and paging must agree on a turn. */
+internal fun parseTurnOutline(value: JsonElement?): List<HistoryTurn>? =
+    com.labteto.dshmobile.core.session.parseTurnOutline(value)
 
 /** Full projection directory when available; older hosts retain the loaded human-prompt list. */
 internal fun historyEntries(

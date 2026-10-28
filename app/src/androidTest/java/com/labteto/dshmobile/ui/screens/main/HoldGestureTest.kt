@@ -154,9 +154,9 @@ class HoldGestureTest {
         compose.onNode(hasTestTag(HOLD_MENU_TAG)).assertDoesNotExist()
     }
 
-    /** The row shows the description; the copy is the command that actually ran, and its output. */
+    /** Expanding a process reveals reader-safe tool status, not hidden raw-output hold actions. */
     @Test
-    fun holdingAToolCallCopiesTheCommandItRan() {
+    fun holdingAnExpandedToolCallDoesNotExposeRawArgumentsOrOutput() {
         val call = ToolCallNode(
             seq = 2,
             callId = "c1",
@@ -174,6 +174,8 @@ class HoldGestureTest {
             step = 1,
         )
         transcript(listOf(user(1, prompt), call, result))
+        compose.onNodeWithText("bash").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.chat_tool_group_count, 1)).performClick()
         // Minimal reader rows have no hidden raw-output/argument hold actions.
         compose.onNodeWithText("bash").assertExists()
         compose.onNodeWithText("List the sources").assertDoesNotExist()

@@ -60,6 +60,15 @@ class HistoryViewportRestoreTest {
         assertEquals(2, historyRestoreIndex(keys, position, false))
     }
 
+    @Test fun `restore accepts a cumulatively widened range before lazy keys are available`() {
+        val request = HistoryViewportRestoreRequest(1, HistoryReadingPosition(50L, 19, 50, false), "s", 20, 79)
+        // ChatScreen checks readiness before supplying the pane's lazy keys.
+        assertTrue(historyRestoreWindowReady(window(0, 99), emptyList(), request))
+        assertFalse(historyRestoreWindowReady(window(0, 78), emptyList(), request))
+        assertFalse(historyRestoreWindowReady(window(21, 99), emptyList(), request))
+        assertFalse(historyRestoreWindowReady(window(0, 99).copy(sessionId = "another"), emptyList(), request))
+    }
+
     @Test fun `restore request waits for nonoverlapping window publication`() {
         val request = HistoryViewportRestoreRequest(1, HistoryReadingPosition(50L, 19, 50, false), "s", 20, 79)
         val wrong = window(100, 159)

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">الجولة %1$d</string>
+    <string name="history_turn_no_prompt">لا تتوفر معاينة للمطالبة</string>
+    <string name="history_turn_loading">جارٍ تحميل الجولة…</string>
+    <string name="history_turn_failed">تعذّر فتح هذه الجولة. اضغط لإعادة المحاولة.</string>
+    <string name="history_window_empty">لا توجد مطالبات في الجزء المحمّل. حمّل رسائل أقدم أو أحدث لعرض المزيد.</string>
+    <string name="reader_tool_result">نتيجة الأداة</string>
+    <string name="reader_tool_running">قيد التشغيل</string>
+    <string name="reader_tool_done">تم</string>
+    <string name="reader_tool_error">خطأ</string>
+    <string name="reader_tool_unknown">الحالة غير متاحة</string>
+    <string name="reader_task_pending">قيد الانتظار</string>
+    <string name="reader_task_running">قيد التنفيذ</string>
+    <string name="reader_task_done">مكتمل</string>
+    <string name="reader_image_reference">صورة مرفقة</string>
+    <string name="reader_image_preview">اضغط لتحميل المعاينة</string>
+    <string name="chatlist_refresh">تحديث قائمة الجلسات</string>
+    <string name="chatlist_refreshing">جارٍ تحديث قائمة الجلسات…</string>
+    <string name="chatlist_refresh_failed">تعذّر التحديث. تحقّق من اتصالك وحاول مجددًا.</string>
+    <string name="chat_zen_enter">الدخول إلى وضع زِن</string>
+    <string name="chat_zen_exit">الخروج من وضع زِن</string>
+    <string name="chat_zen_menu">خيارات الدردشة</string>
+    <string name="chat_zen_permissions">الأذونات</string>
+</resources>

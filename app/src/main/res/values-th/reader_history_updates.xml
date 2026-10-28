@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">รอบที่ %1$d</string>
+    <string name="history_turn_no_prompt">ไม่มีตัวอย่างข้อความที่ส่ง</string>
+    <string name="history_turn_loading">กำลังโหลดรอบการสนทนา…</string>
+    <string name="history_turn_failed">เปิดรอบการสนทนานี้ไม่ได้ แตะเพื่อลองอีกครั้ง</string>
+    <string name="history_window_empty">ไม่มีข้อความที่ส่งในส่วนที่โหลดนี้ โหลดข้อความเก่าหรือใหม่กว่าเพื่อดูเพิ่มเติม</string>
+    <string name="reader_tool_result">ผลลัพธ์จากเครื่องมือ</string>
+    <string name="reader_tool_running">กำลังทำงาน</string>
+    <string name="reader_tool_done">เสร็จสิ้น</string>
+    <string name="reader_tool_error">ข้อผิดพลาด</string>
+    <string name="reader_tool_unknown">ไม่ทราบสถานะ</string>
+    <string name="reader_task_pending">รอดำเนินการ</string>
+    <string name="reader_task_running">กำลังดำเนินการ</string>
+    <string name="reader_task_done">เสร็จสมบูรณ์</string>
+    <string name="reader_image_reference">รูปภาพแนบ</string>
+    <string name="reader_image_preview">แตะเพื่อโหลดตัวอย่าง</string>
+    <string name="chatlist_refresh">รีเฟรชรายการเซสชัน</string>
+    <string name="chatlist_refreshing">กำลังรีเฟรชรายการเซสชัน…</string>
+    <string name="chatlist_refresh_failed">รีเฟรชไม่ได้ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง</string>
+    <string name="chat_zen_enter">เข้าสู่โหมดเซน</string>
+    <string name="chat_zen_exit">ออกจากโหมดเซน</string>
+    <string name="chat_zen_menu">ตัวเลือกแชต</string>
+    <string name="chat_zen_permissions">สิทธิ์</string>
+</resources>

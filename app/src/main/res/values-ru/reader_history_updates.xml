@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">Ход %1$d</string>
+    <string name="history_turn_no_prompt">Предпросмотр запроса недоступен</string>
+    <string name="history_turn_loading">Загрузка хода…</string>
+    <string name="history_turn_failed">Не удалось открыть этот ход. Нажмите, чтобы повторить попытку.</string>
+    <string name="history_window_empty">В загруженной части нет запросов. Загрузите более ранние или более новые сообщения, чтобы продолжить просмотр.</string>
+    <string name="reader_tool_result">Результат инструмента</string>
+    <string name="reader_tool_running">Выполняется</string>
+    <string name="reader_tool_done">Готово</string>
+    <string name="reader_tool_error">Ошибка</string>
+    <string name="reader_tool_unknown">Статус недоступен</string>
+    <string name="reader_task_pending">Ожидает выполнения</string>
+    <string name="reader_task_running">В процессе</string>
+    <string name="reader_task_done">Завершено</string>
+    <string name="reader_image_reference">Вложенное изображение</string>
+    <string name="reader_image_preview">Нажмите, чтобы загрузить предпросмотр</string>
+    <string name="chatlist_refresh">Обновить список сеансов</string>
+    <string name="chatlist_refreshing">Обновление списка сеансов…</string>
+    <string name="chatlist_refresh_failed">Не удалось обновить. Проверьте подключение и повторите попытку.</string>
+    <string name="chat_zen_enter">Включить режим дзен</string>
+    <string name="chat_zen_exit">Выйти из режима дзен</string>
+    <string name="chat_zen_menu">Параметры чата</string>
+    <string name="chat_zen_permissions">Разрешения</string>
+</resources>

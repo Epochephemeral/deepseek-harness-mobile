@@ -154,6 +154,11 @@ data class QueueItem(
     val content: JsonElement,
 )
 
+/** Settlement identity only; reconciling a live preview does not require retaining raw JSON. */
+data class DurableSettlement(
+    val type: String, val turn: Int?, val step: Int?, val seq: Long, val surfaceOp: String?,
+)
+
 /**
  * The folded, chat-renderable view of one session. Rebuilt incrementally
  * from [EventFold]; queue/projections are merged in by the session store.
@@ -174,6 +179,11 @@ data class ConversationSnapshot(
     val fromCache: Boolean = false,
     /** Newer durable content is on disk outside this viewport; the live stream still drains. */
     val hasNewer: Boolean = false,
+    /** Loaded raw coverage is independent of retained public nodes and optional raw detail payloads. */
+    val loadedFromSeq: Long? = null,
+    val loadedThroughSeq: Long? = null,
+    val eventTimes: Map<Long, Long> = emptyMap(),
+    val durableSettlements: List<DurableSettlement> = emptyList(),
 ) {
     val turns: Int get() = nodes.count { it is TurnStartNode }
 }

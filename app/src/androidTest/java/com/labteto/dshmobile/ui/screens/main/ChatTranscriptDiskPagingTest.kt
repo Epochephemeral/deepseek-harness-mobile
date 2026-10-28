@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.labteto.dshmobile.R
@@ -44,6 +46,8 @@ class ChatTranscriptDiskPagingTest {
         var jump by mutableStateOf<Long?>(null)
         var sentTick by mutableIntStateOf(0)
         @Volatile var newerRequests = 0
+        var olderRequests = 0
+        var loadOlder: () -> Unit = {}
         var latestRequests = 0
         var lastReportedAnchor: Long? = null
         var lastReportedAtTail = false
@@ -51,8 +55,9 @@ class ChatTranscriptDiskPagingTest {
         lateinit var listState: LazyListState
     }
 
-    private fun harness(hasNewer: Boolean = true): Harness {
-        val h = Harness(ConversationSnapshot(sessionId = "disk-session", nodes = rows(20, 79), hasNewer = hasNewer))
+    private fun harness(hasNewer: Boolean = true, initialRows: List<ChatNode> = rows(20, 79), hasMore: Boolean = false): Harness {
+        val h = Harness(ConversationSnapshot(sessionId = "disk-session", nodes = initialRows,
+            hasNewer = hasNewer, hasMore = hasMore))
         compose.setContent {
             h.listState = rememberLazyListState()
             DshTheme {
@@ -64,7 +69,7 @@ class ChatTranscriptDiskPagingTest {
                     context = ChatNodeContext(nodes = h.snapshot.nodes, running = false, cwd = null,
                         onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> }),
                     listState = h.listState,
-                    onLoadOlder = {},
+                    onLoadOlder = { h.olderRequests++; h.loadOlder() },
                     modifier = Modifier.testTag(TRANSCRIPT),
                     jumpToSeq = h.jump,
                     onJumpConsumed = { h.jump = null },
@@ -130,17 +135,72 @@ class ChatTranscriptDiskPagingTest {
         }
     }
 
-    @Test fun approachingTheNewerDiskEdgeAutomaticallyRequestsItsPageWithoutATap() {
+    @Test fun newerDiskEdgeWaitsForGenuineGestureAndRequestsOncePerDrag() {
         val h = harness()
-        compose.runOnIdle {
-            assertEquals(0, h.newerRequests)
-            h.loadingNewer = false
-        }
-        compose.waitUntil(5_000) { h.newerRequests > 0 }
+        compose.runOnIdle { h.loadingNewer = false }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("layout alone must not page forward", 0, h.newerRequests) }
+        compose.onNodeWithTag(TRANSCRIPT).performTouchInput { swipeUp() }
+        compose.waitForIdle()
         compose.runOnIdle {
             assertEquals(1, h.newerRequests)
             assertTrue(h.loadingNewer)
             assertEquals(0, h.latestRequests)
+            h.loadingNewer = false
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("settling a request must not start another", 1, h.newerRequests) }
+        compose.onNodeWithTag(TRANSCRIPT).performTouchInput { swipeUp() }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("a new deliberate drag can page again", 2, h.newerRequests) }
+    }
+
+    private fun assertExplicitOlderDoesNotBounceForward(olderRows: List<ChatNode>) {
+        val h = harness(hasNewer = false, initialRows = rows(100, 100), hasMore = true)
+        compose.runOnIdle {
+            h.loadingNewer = false
+            h.loadOlder = { h.snapshot = h.snapshot.copy(nodes = olderRows, hasNewer = true) }
+        }
+        compose.waitForIdle()
+        val label = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.chat_load_older)
+        compose.onNodeWithText(label).assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(1, h.olderRequests)
+            assertEquals("publishing older history must not request the opposite direction", 0, h.newerRequests)
+            assertEquals(olderRows, h.snapshot.nodes)
+            assertTrue(h.snapshot.hasNewer)
+            assertFalse(h.lastReportedAtTail)
+            // An unrelated publication must not arm a layout-driven request either.
+            h.snapshot = h.snapshot.copy(lastSeq = 99)
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(0, h.newerRequests) }
+    }
+
+    @Test fun explicitOlderShortWindowDoesNotImmediatelyPageForward() {
+        assertExplicitOlderDoesNotBounceForward(rows(80, 80))
+    }
+
+    @Test fun explicitOlderAllSkipWindowDoesNotImmediatelyPageForward() {
+        // EventFold emits no nodes for reader/skip coverage rows.
+        assertExplicitOlderDoesNotBounceForward(emptyList())
+    }
+
+    @Test fun explicitOlderTallSingleRowDoesNotImmediatelyPageForward() {
+        assertExplicitOlderDoesNotBounceForward(listOf(UserMessageNode(80, "u80",
+            listOf(ChatBlock("text", "Older message line\n".repeat(100))), sourceKind = "user")))
+    }
+
+    @Test fun explicitOlderClickDisarmsFollowingEvenBeforeItsPageArrives() {
+        val h = harness(hasNewer = false, initialRows = rows(100, 100), hasMore = true)
+        compose.runOnIdle { assertTrue(h.lastReportedAtTail) }
+        val label = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.chat_load_older)
+        compose.onNodeWithText(label).assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(1, h.olderRequests)
+            assertFalse("an explicit older click is reading intent, not tail following", h.lastReportedAtTail)
         }
     }
 
@@ -235,6 +295,8 @@ class ChatTranscriptDiskPagingTest {
     @Test fun failedNewerPageStopsAutomaticRetriesButKeepsAnExplicitRetryAvailable() {
         val h = harness()
         compose.runOnIdle { h.loadingNewer = false }
+        compose.waitForIdle()
+        compose.onNodeWithTag(TRANSCRIPT).performTouchInput { swipeUp() }
         compose.waitUntil(5_000) { h.newerRequests == 1 }
         compose.runOnIdle {
             h.loadNewerFailed = true
@@ -243,6 +305,8 @@ class ChatTranscriptDiskPagingTest {
         compose.waitForIdle()
         // An unrelated disk-state publication must not restart the failed automatic request.
         compose.runOnIdle { h.snapshot = h.snapshot.copy(lastSeq = 123L) }
+        compose.waitForIdle()
+        compose.onNodeWithTag(TRANSCRIPT).performTouchInput { swipeUp() }
         compose.waitForIdle()
         compose.runOnIdle {
             assertEquals(1, h.newerRequests)

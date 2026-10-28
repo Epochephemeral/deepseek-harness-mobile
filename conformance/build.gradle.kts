@@ -37,6 +37,10 @@ dependencies {
 
 tasks.test {
     inputs.property("harnessSource", System.getenv("DSH_HARNESS_SRC") ?: "auto")
+    inputs.property("harnessCli", System.getenv("DSH_HARNESS_CLI") ?: "source")
+    inputs.property("harnessRuntimeRoot", System.getenv("DSH_HARNESS_RUNTIME_ROOT") ?: "auto")
+    inputs.property("readerConformance", System.getenv("DSH_READER_CONFORMANCE") ?: "false")
+    inputs.property("readerResolver", System.getenv("DSH_READER_RESOLVER") ?: "none")
     inputs.property("legacyConformance", System.getenv("DSH_LEGACY_CONFORMANCE") ?: "false")
     // A real harness boot plus a model turn is slower than a unit test, and the output of a failure
     // is the useful part.

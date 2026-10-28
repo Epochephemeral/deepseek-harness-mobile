@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">संवाद चरण %1$d</string>
+    <string name="history_turn_no_prompt">संदेश का पूर्वावलोकन उपलब्ध नहीं</string>
+    <string name="history_turn_loading">संवाद चरण लोड हो रहा है…</string>
+    <string name="history_turn_failed">यह संवाद चरण नहीं खुल सका। फिर से कोशिश करने के लिए टैप करें।</string>
+    <string name="history_window_empty">लोड किए गए हिस्से में कोई भेजा गया संदेश नहीं है। और देखने के लिए पुराने या नए संदेश लोड करें।</string>
+    <string name="reader_tool_result">टूल का परिणाम</string>
+    <string name="reader_tool_running">चल रहा है</string>
+    <string name="reader_tool_done">पूर्ण</string>
+    <string name="reader_tool_error">त्रुटि</string>
+    <string name="reader_tool_unknown">स्थिति उपलब्ध नहीं</string>
+    <string name="reader_task_pending">लंबित</string>
+    <string name="reader_task_running">प्रगति में</string>
+    <string name="reader_task_done">पूरा हुआ</string>
+    <string name="reader_image_reference">संलग्न चित्र</string>
+    <string name="reader_image_preview">पूर्वावलोकन लोड करने के लिए टैप करें</string>
+    <string name="chatlist_refresh">सत्र सूची रीफ़्रेश करें</string>
+    <string name="chatlist_refreshing">सत्र सूची रीफ़्रेश हो रही है…</string>
+    <string name="chatlist_refresh_failed">रीफ़्रेश नहीं हो सका। अपना कनेक्शन जाँचें और फिर से कोशिश करें।</string>
+    <string name="chat_zen_enter">ज़ेन मोड चालू करें</string>
+    <string name="chat_zen_exit">ज़ेन मोड से बाहर निकलें</string>
+    <string name="chat_zen_menu">चैट विकल्प</string>
+    <string name="chat_zen_permissions">अनुमतियाँ</string>
+</resources>

@@ -208,6 +208,21 @@ internal class SessionHistoryDisk(store: DiskCacheStore) : Closeable {
         readPage(host,sid,start,minOf(logicalEnd,rawEnd),range,maxMessages,anchor,WindowDirection.AROUND)
     }
 
+    /** Read a complete inclusive loaded interval. The wire/page budget does not cap retained history.
+     * Missing edges or gaps return null; selecting a nearby component would fabricate continuity.
+     */
+    fun range(host: String, sid: String, fromSeq: Long, throughSeq: Long): HistoryDiskPage? = synchronized(lock) {
+        require(fromSeq >= 0 && fromSeq <= throughSeq)
+        val covered = db.rawQuery(
+            "SELECT end_seq FROM ranges WHERE host=? AND sid=? AND start_seq<=? ORDER BY start_seq DESC LIMIT 1",
+            args(host, sid, fromSeq),
+        ).use { it.moveToFirst() && it.getLong(0) >= throughSeq }
+        if (!covered) return@synchronized null
+        val legacy = one("SELECT 1 FROM events WHERE host=? AND sid=? AND type='assistant/chunk' AND seq BETWEEN ? AND ? LIMIT 1",
+            args(host, sid, fromSeq, throughSeq)) != null
+        read(host, sid, fromSeq, throughSeq, legacyUnbounded = legacy)
+    }
+
     /** Modern durable records stand alone. Legacy chunks need context before and after the raw
      * window; retain those complete user turns rather than showing a false/truncated message. */
     private enum class WindowDirection { BACKWARD, FORWARD, AROUND }

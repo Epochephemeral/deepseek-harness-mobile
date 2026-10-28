@@ -41,6 +41,31 @@ class PreviewSettlementReconciliationTest {
         assertEquals(0L, disk.usage("stream").totalBytes)
     }
 
+    @Test fun `compact reader metadata retires paged settlements without retaining raw journal`() {
+        val live = AssistantLiveState().apply { accept(start()); accept(chunk(0)) }
+        val timeline = ReaderTurnTimeline("s")
+        val durable = timeline.mergeRange(listOf(event("assistant/message", 10, op = "append")))
+        assertTrue(durable.journal.isEmpty())
+        assertSame(durable, live.transientSnapshot(durable))
+        assertFalse(live.active)
+        live.accept(start("next", after = 10)); live.accept(chunk(0, "next"))
+        val attempted = timeline.append(event("assistant/attempt", 11))
+        assertSame(attempted, live.transientSnapshot(attempted))
+        assertFalse(live.active)
+        live.clear()
+    }
+
+    @Test fun `compact reader live preview follows raw coverage not last visible message`() {
+        val live = AssistantLiveState().apply { accept(start(after = 99)); accept(chunk(0)) }
+        val timeline = ReaderTurnTimeline("s")
+        val durable = timeline.mergeRange((100L..227).map { SessionEventEnvelope("reader/skip", it, it, JsonNull) })
+        val preview = live.transientSnapshot(durable).nodes.filterIsInstance<AssistantMessageNode>().single()
+        assertTrue(preview.streaming)
+        assertEquals(228L, preview.seq)
+        assertTrue(live.active)
+        live.clear()
+    }
+
     @Test fun `old wrong turn wrong step and positional replacement cannot retire open attempt`() {
         val live = AssistantLiveState().apply { accept(start(after = 10)); accept(chunk(0)) }
         val journal = listOf(

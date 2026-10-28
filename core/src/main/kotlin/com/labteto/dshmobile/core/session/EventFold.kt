@@ -76,7 +76,7 @@ class EventFold(private val sessionId: String) {
         if (transient.isEmpty()) return durable
         if (durable.journal.any { it.type == "assistant/chunk" }) return fold(durable.journal, transient)
         val preview = FoldState(sessionId)
-        preview.lastSeq = durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
+        preview.lastSeq = durable.loadedThroughSeq ?: durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
         transient.forEach { preview.applyTransient(it) }
         return durable.copy(nodes = durable.nodes + preview.snapshot().nodes)
     }
@@ -106,7 +106,7 @@ class EventFold(private val sessionId: String) {
             if (chunks.count == 0) return durable
             if (base !== durable) {
                 base = durable
-                baseCursor = durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
+                baseCursor = durable.loadedThroughSeq ?: durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
                 legacy = if (durable.journal.any { it.type == "assistant/chunk" }) {
                     FoldState(durable.sessionId).also { state ->
                         durable.journal.filter { it.foldsToNode() }.forEach(state::apply)

@@ -34,6 +34,123 @@ class SessionHistoryDiskTest {
         JsonObject(mapOf("text" to JsonPrimitive("event $seq"))),
         surfaceOp="append",sourceEventSeqs=listOf(seq.toInt()),ignorable=false)
 
+    @Test fun exactLoadedRangeExceedsTransportPageWithoutDroppingEndpoints() = fixture { f ->
+        val sid = "reader-v1\u0000continuous"
+        val records = (0L until 1024).map { event(it) }
+        f.cache.storeEvents("h", sid, f.cache.ticket(), records)
+        val range = requireNotNull(f.cache.historyRange("h", sid, 100, 900))
+        assertEquals(records.filter { it.seq in 100..900 }, range.events)
+        assertEquals(801, range.events.size)
+        assertEquals(100L, range.firstSeq); assertEquals(900L, range.lastSeq)
+        assertTrue(range.hasOlder); assertTrue(range.hasNewer)
+        assertEquals(range.events.sumOf { encodeHistoryEvent(it).payload.size.toLong() }, range.payloadBytes)
+        // Fetch batches remain bounded independently of the accumulated reading interval.
+        assertTrue(f.cache.latestHistory("h", sid).events.size <= 128)
+    }
+
+    @Test fun reducedReaderHistoryRetainsEightThousandEventsWithoutImportingToolPayloads() = fixture { f ->
+        val sid = "reader-v1\u0000resource-check"
+        val records = (0L until 8224).map { seq ->
+            val turn = seq / 512 + 1
+            val type: String
+            val body: JsonElement
+            when {
+                seq % 512 == 0L -> { type = "turn/start"; body = buildJsonObject { put("turn", turn) } }
+                seq % 512 == 1L -> {
+                    type = "user/message"
+                    body = buildJsonObject {
+                        put("id", "user-$seq")
+                        put("source", buildJsonObject { put("kind", "user") })
+                        put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", "request $seq") }) })
+                    }
+                }
+                seq % 8 == 2L -> {
+                    type = "tool/call"
+                    body = buildJsonObject {
+                        put("turn", turn); put("callId", "call-$seq"); put("name", "bash"); put("description", "Inspect $seq")
+                        put("reader", buildJsonObject { put("argumentsOmitted", true) })
+                    }
+                }
+                seq % 8 == 3L -> {
+                    type = "tool/result"
+                    body = buildJsonObject { put("turn", turn); put("message", buildJsonObject {
+                        put("role", "tool"); put("toolCallId", "call-${seq - 1}"); put("content", buildJsonArray { }); put("isError", false)
+                    }); put("reader", buildJsonObject { put("outputOmitted", true); put("status", "completed") }) }
+                }
+                seq % 32 == 4L -> {
+                    type = "assistant/message"
+                    body = buildJsonObject { put("turn", turn); put("message", buildJsonObject {
+                        put("role", "assistant"); put("id", "assistant-$seq")
+                        put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", "Progress $seq. " + "Public reply text. ".repeat(24)) }) })
+                    }) }
+                }
+                else -> { type = "reader/skip"; body = JsonNull }
+            }
+            SessionEventEnvelope(type, seq, seq, body)
+        }
+        // This represents many separately admitted transport batches, never one oversized RPC.
+        records.chunked(128).forEach { batch ->
+            assertTrue(f.cache.storeEvents("h", sid, f.cache.ticket(), batch))
+        }
+        val readStart = android.os.SystemClock.elapsedRealtime()
+        val loaded = requireNotNull(f.cache.historyRange("h", sid, 0, 8223))
+        val readMs = android.os.SystemClock.elapsedRealtime() - readStart
+        val foldStart = android.os.SystemClock.elapsedRealtime()
+        val snapshot = EventFold("resource-check").fold(loaded.events)
+        val foldMs = android.os.SystemClock.elapsedRealtime() - foldStart
+        assertEquals(8224, snapshot.journal.size)
+        assertEquals(0L, snapshot.journal.first().seq); assertEquals(8223L, snapshot.journal.last().seq)
+        assertTrue(snapshot.nodes.filterIsInstance<com.labteto.dshmobile.core.session.ToolCallNode>().all { it.arguments.isEmpty() })
+        assertTrue(snapshot.nodes.filterIsInstance<com.labteto.dshmobile.core.session.ToolResultNode>().all { it.outputOmitted })
+        assertFalse(snapshot.nodes.any { it is com.labteto.dshmobile.core.session.OtherNode })
+        assertTrue(f.cache.latestHistory("h", sid).events.size <= 128)
+        val timeline = com.labteto.dshmobile.core.session.ReaderTurnTimeline("resource-check")
+        val materializeStart = System.nanoTime()
+        val compact = timeline.mergeRange(loaded.events)
+        val materializeMs = (System.nanoTime() - materializeStart) / 1_000_000
+        assertEquals(snapshot.nodes, compact.nodes)
+        assertTrue(compact.journal.isEmpty()); assertTrue(compact.effectiveSurface.isEmpty())
+        assertEquals(0L, compact.loadedFromSeq); assertEquals(8223L, compact.loadedThroughSeq)
+        assertEquals("request 1", compact.nodes.filterIsInstance<com.labteto.dshmobile.core.session.UserMessageNode>().first().previewText)
+        val samplesMicros = (8224L until 8324).map { seq ->
+            val update = SessionEventEnvelope("tool/call", seq, seq, buildJsonObject {
+                put("turn", 17); put("step", 1); put("callId", "live-$seq"); put("name", "bash")
+            })
+            val began = System.nanoTime()
+            timeline.append(update)
+            (System.nanoTime() - began) / 1_000
+        }.sorted()
+        assertEquals(compact.nodes.size + 100, timeline.snapshot().nodes.size)
+        assertEquals(0L, timeline.firstSeq)
+        // Timings are observations, not flaky machine-specific pass/fail limits.
+        android.util.Log.i("ContinuousHistory", "events=${loaded.events.size} payloadBytes=${loaded.payloadBytes} nodes=${compact.nodes.size} exactReadMs=$readMs rawFoldMs=$foldMs materializeMs=$materializeMs liveAppendP50Micros=${samplesMicros[49]} liveAppendP95Micros=${samplesMicros[94]}")
+    }
+
+    @Test fun exactLoadedRangeRejectsGapsAndMissingEdgesRatherThanSelectingNearbyRows() = fixture { f ->
+        val ticket = f.cache.ticket()
+        f.cache.storeEvents("h", "s", ticket, (10L..99).map { event(it) } + (200L..299).map { event(it) })
+        assertNull(f.cache.historyRange("h", "s", 0, 50))
+        assertNull(f.cache.historyRange("h", "s", 50, 300))
+        assertNull(f.cache.historyRange("h", "s", 50, 250))
+        assertNull(f.cache.historyRange("h", "s", 100, 100))
+        assertNotNull(f.cache.historyRange("h", "s", 50, 99))
+        f.cache.storeEvents("h", "s", ticket, (100L..199).map { event(it) })
+        assertEquals((50L..250).toList(), f.cache.historyRange("h", "s", 50, 250)?.events?.map { it.seq })
+        f.cache.removeHistoryAfter("h", "s", 199, ticket)
+        assertNull(f.cache.historyRange("h", "s", 50, 250))
+    }
+
+    @Test fun exactRangeRespectsClearTicketsNamespaceAndSingleRow() = fixture { f ->
+        val ticket = f.cache.ticket()
+        f.cache.storeEvents("h", "reader-v1\u0000s", ticket, listOf(event(42)))
+        assertEquals(listOf(event(42)), f.cache.historyRange("h", "reader-v1\u0000s", 42, 42)?.events)
+        assertNull(f.cache.historyRange("h", "s", 42, 42))
+        assertNull(f.cache.historyRange("other", "reader-v1\u0000s", 42, 42))
+        f.cache.clear()
+        assertNull(f.cache.historyRange("h", "reader-v1\u0000s", 42, 42, ticket))
+        assertNull(f.cache.historyRange("h", "reader-v1\u0000s", 42, 42))
+    }
+
     @Test fun retainsMoreThanTenThousandEventsAndPagesBothWaysAtWholeTurns() = fixture { f ->
         val ticket=f.cache.ticket()
         assertTrue(f.cache.storeEvents("host-a","session",ticket,(0L until 12_000).map { event(it) }))

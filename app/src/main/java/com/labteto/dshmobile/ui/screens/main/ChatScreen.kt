@@ -151,15 +151,12 @@ fun ChatScreen(
     var panelKey by remember { mutableStateOf<ComposerKey?>(null) }
     var feedback by remember { mutableStateOf<Triple<ComposerKey, String, Boolean>?>(null) }
     var sheet by remember { mutableStateOf<ChatSheet?>(null) }
-    // A message chosen from the history sheet, waiting for the transcript to scroll to it. Held
-    // here rather than inside the transcript because the pick is made in a sheet that outlives no
-    // layout of its own, and it has to survive the sheet closing.
-    var pendingJumpSeq by remember { mutableStateOf<Long?>(null) }
     // Each event's time by sequence, for the transcript's timestamps and the history sheet's. Built
     // once per journal rather than on every recomposition: a streaming reply recomposes this screen
     // many times a second without adding a single durable event.
-    val eventTimes = remember(conversation?.journal) {
-        conversation?.journal?.associate { it.seq to it.time }.orEmpty()
+    val eventTimes = remember(conversation?.eventTimes, conversation?.journal) {
+        conversation?.eventTimes?.takeIf { it.isNotEmpty() }
+            ?: conversation?.journal?.associate { it.seq to it.time }.orEmpty()
     }
     // A decorated command's picker (the phone's `popupSelect`), keyed by the command it serves.
     var popup by remember(composer.key) { mutableStateOf<Pair<String, CommandUiSpec.PopupSelect>?>(null) }
@@ -172,51 +169,32 @@ fun ChatScreen(
     // Hoisted above the tab swap so each view keeps its own scroll position across switches.
     val chatListState = rememberLazyListState()
     val trajectoryListState = rememberLazyListState()
-    val historyReading = remember(hostKey, currentSessionId) { HistoryReadingState() }
-    val currentHistoryReading by rememberUpdatedState(historyReading)
-    var historySeekJob by remember(historyReading) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var historySeeking by remember(historyReading) { mutableStateOf(false) }
-    var historyFailedEntry by remember(historyReading) { mutableStateOf<HistoryEntry?>(null) }
+    val historyReading = remember(hostKey, currentSessionId) { HistoryReadingState(store, scope, currentSessionId) }
     val turnOutline = conversation?.projections?.get("turnOutline")
     val hasTurnOutline = remember(turnOutline) { parseTurnOutline(turnOutline) != null }
-    val historyDirectory = if (sheet == ChatSheet.History) {
+    val historyDirectory = if (historyReading.sheetOpen) {
         remember(conversation?.nodes, conversation?.running, eventTimes, turnOutline) {
             historyEntries(conversation?.nodes.orEmpty(), conversation?.running == true, eventTimes, turnOutline)
         }
     } else emptyList()
     androidx.compose.runtime.DisposableEffect(historyReading) {
-        onDispose { historySeekJob?.cancel() }
+        onDispose { historyReading.dispose() }
     }
-    val historyInteractionAllowed by rememberUpdatedState(sheet != ChatSheet.History && !historyReading.restoring)
+    val historyInteractionAllowed by rememberUpdatedState(historyReading.interactionAllowed(activeHistoryTab, activeHistoryTab))
 
-    fun captureReading(view: ChatTab): HistoryViewBookmark? {
-        if (historyReading !== currentHistoryReading) return null
+    // The screen measures the physical list; the reading owner owns every transition and job.
+    fun captureReading(view: ChatTab): HistoryPaneCapture {
         val state = if (view == ChatTab.Chat) chatListState else trajectoryListState
         val current = store.currentConversation.value
         val streamingSeq = current?.nodes?.filterIsInstance<com.labteto.dshmobile.core.session.AssistantMessageNode>()
             ?.lastOrNull { it.streaming }?.seq
-        val position = captureHistoryReadingPosition(state, view == ChatTab.Chat, current?.hasNewer == true, streamingSeq)
-        store.updateHistoryViewport(position.anchorSeq, position.atTail)
-        val window = store.captureHistoryViewport() ?: return null
-        historyReading.rendered[view] = HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing)
-        return HistoryViewBookmark(view, window, position).also { historyReading.views[view] = it }
+        return HistoryPaneCapture(
+            captureHistoryReadingPosition(state, view == ChatTab.Chat, current?.hasNewer == true, streamingSeq),
+            HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing))
     }
 
-    fun switchHistoryView(target: ChatTab, activate: () -> Unit) {
-        if (historyReading !== currentHistoryReading || historyReading.restoring || sheet == ChatSheet.History) return
-        if (target == activeHistoryTab) { activate(); return }
-        captureReading(activeHistoryTab)
-        val bookmark = historyReading.views[target]
-        if (bookmark == null) { activate(); return }
-        historyReading.restoring = true
-        scope.launch {
-            val restored = store.restoreHistoryViewport(bookmark.window)
-            if (historyReading !== currentHistoryReading) return@launch
-            if (restored) historyReading.request(target, bookmark.position, store.currentConversation.value)
-            else { historyReading.views.remove(target); historyReading.cancelRestore() }
-            activate()
-        }
-    }
+    fun switchHistoryView(target: ChatTab, activate: () -> Unit) =
+        historyReading.switchView(activeHistoryTab, target, { captureReading(activeHistoryTab) }, activate)
 
     fun setZen(enabled: Boolean) {
         val target = if (enabled) ChatTab.Chat else tab
@@ -227,62 +205,10 @@ fun ChatScreen(
     }
 
     fun openHistory() {
-        if (historyReading !== currentHistoryReading || historyReading.restoring || sheet == ChatSheet.History) return
-        historyReading.sheetBookmark = captureReading(activeHistoryTab)
-        historyFailedEntry = null
-        sheet = ChatSheet.History
+        if (historyReading.openHistory(activeHistoryTab) { captureReading(activeHistoryTab) }) sheet = null
     }
 
-    fun dismissHistory(after: () -> Unit = {}) {
-        if (historyReading !== currentHistoryReading || historyReading.restoring) return
-        val cancelledSeek = historySeekJob
-        cancelledSeek?.cancel()
-        val bookmark = historyReading.sheetBookmark
-        historyReading.restoring = true
-        scope.launch {
-            cancelledSeek?.join()
-            if (historyReading !== currentHistoryReading) return@launch
-            if (bookmark == null) {
-                historyReading.cancelRestore(); sheet = null; after(); return@launch
-            }
-            val restored = store.restoreHistoryViewport(bookmark.window)
-            if (historyReading !== currentHistoryReading) return@launch
-            val finish = { historyReading.sheetBookmark = null; sheet = null; after() }
-            if (restored) historyReading.request(bookmark.view, bookmark.position, store.currentConversation.value, finish)
-            else { historyReading.cancelRestore(); finish() }
-        }
-    }
-
-    fun pickHistory(entry: HistoryEntry) {
-        if (historyReading !== currentHistoryReading || historyReading.restoring || historySeeking) return
-        historySeeking = true
-        historyFailedEntry = null
-        historySeekJob = scope.launch {
-            try {
-                val loaded = store.seekHistoryTurn(entry.targetStartSeq ?: entry.seq)
-                if (historyReading !== currentHistoryReading || sheet != ChatSheet.History) return@launch
-                val current = store.currentConversation.value
-                val target = if (loaded && current != null && current.sessionId == currentSessionId) {
-                    historyJumpTarget(entry, current.nodes, current.running, current.projections["turnOutline"])
-                } else null
-                if (target == null) {
-                    historyFailedEntry = entry
-                    return@launch
-                }
-                store.updateHistoryViewport(target, false)
-                historyReading.sheetBookmark = null
-                pendingJumpSeq = target
-                sheet = null
-                tab = ChatTab.Chat
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (historyReading === currentHistoryReading) historyFailedEntry = entry
-            } finally {
-                historySeeking = false
-            }
-        }
-    }
+    fun pickHistory(entry: HistoryEntry) = historyReading.pick(entry) { tab = ChatTab.Chat }
 
     val commandFailed = stringResource(R.string.err_command_failed)
     val unknownCommand = stringResource(R.string.err_command_unknown)
@@ -684,15 +610,12 @@ fun ChatScreen(
                     modifier = Modifier.weight(1f),
                     label = "chatTab",
                 ) { current ->
-                    val request = if (current == ChatTab.Chat) historyReading.chatRestore else historyReading.trajectoryRestore
-                    val retained = historyReading.rendered[current]
-                    val requestReady = request != null && historyRestoreWindowReady(conversation, emptyList(), request)
-                    val coveredOrOutgoing = current != activeHistoryTab ||
-                        ((sheet == ChatSheet.History || historyReading.restoring) && !requestReady)
-                    val pane = if (coveredOrOutgoing && retained != null) retained else
-                        HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing)
-                    val paneTimes = remember(pane.conversation?.journal) {
-                        pane.conversation?.journal?.associate { it.seq to it.time }.orEmpty()
+                    val request = historyReading.readyRestore(current, conversation)
+                    val pane = historyReading.pane(current, activeHistoryTab,
+                        HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing))
+                    val paneTimes = remember(pane.conversation?.eventTimes, pane.conversation?.journal) {
+                        pane.conversation?.eventTimes?.takeIf { it.isNotEmpty() }
+                            ?: pane.conversation?.journal?.associate { it.seq to it.time }.orEmpty()
                     }
                     val paneContext = nodeContext.copy(nodes = pane.conversation?.nodes.orEmpty(),
                         running = pane.conversation?.running == true, historyReady = pane.historyReady,
@@ -705,9 +628,13 @@ fun ChatScreen(
                             loadOlderFailed = loadOlderFailed,
                             context = paneContext,
                             listState = chatListState,
-                            onLoadOlder = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) scope.launch { store.loadOlder() } },
-                            jumpToSeq = pendingJumpSeq,
-                            onJumpConsumed = { pendingJumpSeq = null },
+                            onLoadOlder = {
+                                if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) {
+                                    scope.launch { store.loadOlder() }
+                                }
+                            },
+                            jumpToSeq = historyReading.pendingJumpSeq,
+                            onJumpConsumed = historyReading::jumpConsumed,
                             sentTick = sentTick,
                             loadingNewer = loadingNewer,
                             loadNewerFailed = loadNewerFailed,
@@ -717,8 +644,9 @@ fun ChatScreen(
                                 if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) store.updateHistoryViewport(anchor, atTail)
                             },
                             historyInteractionEnabled = historyInteractionAllowed && activeHistoryTab == ChatTab.Chat,
-                            viewportRestore = if (requestReady) request else null,
-                            onViewportRestored = { token -> if (historyReading === currentHistoryReading) historyReading.consumed(token) },
+                            viewportRestore = request,
+                            onViewportRestored = historyReading::consumed,
+                            toolGroupState = historyReading.chatToolGroups,
                             showStatusNotices = !zenMode,
                             onSuggestion = if (currentSessionId != null) {
                                 { text -> draft = text; composer.selection = text.length }
@@ -732,6 +660,7 @@ fun ChatScreen(
                             usage = pane.usage,
                             cwd = pane.cwd,
                             listState = trajectoryListState,
+                            loadJournal = { store.loadHistoryJournal() },
                             loadingOlder = loadingOlder,
                             loadOlderFailed = loadOlderFailed,
                             onLoadOlder = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory) scope.launch { store.loadOlder() } },
@@ -742,8 +671,8 @@ fun ChatScreen(
                                 if (historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory) store.updateHistoryViewport(anchor, atTail)
                             },
                             historyInteractionEnabled = historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory,
-                            viewportRestore = if (requestReady) request else null,
-                            onViewportRestored = { token -> if (historyReading === currentHistoryReading) historyReading.consumed(token) },
+                            viewportRestore = request,
+                            onViewportRestored = historyReading::consumed,
                         )
                     }
                 }
@@ -990,7 +919,7 @@ fun ChatScreen(
         )
     }
     feedback?.let { (key, id, positive) -> FeedbackDialog(store, key, id, positive) { feedback = null } }
-    when (sheet) {
+    when (if (historyReading.sheetOpen) ChatSheet.History else sheet) {
         ChatSheet.Commands -> CommandSheet(
             commands = commands,
             commandsAvailable = commandsAvailable,
@@ -1026,17 +955,17 @@ fun ChatScreen(
             hasMore = !hasTurnOutline && conversation?.hasMore == true,
             loadingOlder = loadingOlder,
             loadOlderFailed = loadOlderFailed,
-            onLoadOlder = { if (!historyReading.restoring && !historySeeking) scope.launch { store.loadOlder() } },
+            onLoadOlder = { if (historyReading.canReadSheet) scope.launch { store.loadOlder() } },
             hasNewer = !hasTurnOutline && conversation?.hasNewer == true,
             loadingNewer = loadingNewer,
             loadNewerFailed = loadNewerFailed,
-            onLoadNewer = { if (!historyReading.restoring && !historySeeking) scope.launch { store.loadNewer() } },
-            seeking = historySeeking,
-            seekFailed = historyFailedEntry != null,
-            onRetrySeek = { historyFailedEntry?.let { pickHistory(it) } },
+            onLoadNewer = { if (historyReading.canReadSheet) scope.launch { store.loadNewer() } },
+            seeking = historyReading.seeking,
+            seekFailed = historyReading.failedEntry != null,
+            onRetrySeek = { historyReading.failedEntry?.let { pickHistory(it) } },
             onPick = { seq -> historyDirectory.firstOrNull { it.seq == seq }?.let { pickHistory(it) } },
-            onDismiss = { dismissHistory() },
-            onDismissThen = { after -> dismissHistory(after) },
+            onDismiss = { historyReading.dismissHistory() },
+            onDismissThen = historyReading::dismissHistory,
             onEdit = if (currentSessionId != null) ({ text -> editPrompt(text) }) else null,
         )
         ChatSheet.Presets -> PresetsSheet(

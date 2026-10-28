@@ -4,7 +4,6 @@ import com.labteto.dshmobile.core.wire.READER_VIEW
 import com.labteto.dshmobile.core.wire.READER_MAX_ROWS
 import com.labteto.dshmobile.core.wire.READER_MAX_BYTES
 import com.labteto.dshmobile.core.wire.requireReaderCoverage
-import com.labteto.dshmobile.core.wire.INITIAL_FOLLOW_MESSAGES
 
 import com.labteto.dshmobile.core.wire.automationCatalog
 import com.labteto.dshmobile.core.wire.pluginBundles
@@ -137,6 +136,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -334,6 +334,16 @@ class SessionStore @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
+    private val hostStreams = HostStreamSupervisor(scope, lock)
+    private val historyReader = SessionHistoryReader(historyCache, scope,
+        refreshFollow = ::refreshReaderFollow,
+        onFailure = { source, failure -> scope.launch {
+            // UI faults are owned by historyReader.state; this callback only escalates storage loss.
+            val current = synchronized(lock) { ownsReaderSource(source) }
+            if (current && (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException))
+                connectionManager.reportStorageFailure(failure)
+        } },
+    )
     private var baselineJob: Job? = null
     private val noCurrentGoalMessage = { context.getString(com.labteto.dshmobile.R.string.goal_none) }
     private val migrationRequiredMessage = { context.getString(com.labteto.dshmobile.R.string.alpha2_migration) }
@@ -387,7 +397,7 @@ class SessionStore @Inject constructor(
         scope.launch { featureCall(HarnessFeature.PLUGIN_MANAGEMENT, api) { api.pluginBundles() } }
     }
     private val permissionCatalog = MutableStateFlow<PermissionCatalog?>(null)
-    private var permissionCatalogEpoch = 0L
+    private val permissionCatalogOrder = ReadQueryOrder()
     private val queuesBySession = MutableStateFlow<Map<String, List<QueueItem>>>(emptyMap())
     val sessionQueues: StateFlow<Map<String, List<QueueItem>>> = queuesBySession.asStateFlow()
 
@@ -408,6 +418,7 @@ class SessionStore @Inject constructor(
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
 
+    private val searchQueryOrder = ReadQueryOrder()
     private val _searchResults = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     val searchResults: StateFlow<List<Pair<String, String>>> = _searchResults.asStateFlow()
 
@@ -416,7 +427,8 @@ class SessionStore @Inject constructor(
     /**
      * Whether this harness will answer `session.search`.
      *
-     * Assumed true and latched false by the first refusal — see [search]. Reset on connect, because
+     * Assumed true; only a missing capability or forbidden read latches it false — see [search].
+     * Reset on connect, because
      * it is a fact about the harness on the other end, not about the app.
      */
     val contentSearchAvailable: StateFlow<Boolean> = _contentSearchAvailable.asStateFlow()
@@ -453,22 +465,23 @@ class SessionStore @Inject constructor(
     val hostInfo: StateFlow<HostDescription?> = _hostInfo.asStateFlow()
 
     private val _connectionError = MutableStateFlow<String?>(null)
-    val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+    // Each owner retires only its own fault: reader/stream recovery cannot erase another failure.
+    val connectionError: StateFlow<String?> = combine(_connectionError, hostStreams.failures, historyReader.state) {
+            operation, streams, reader ->
+        val readerError = reader.error?.let { it.message ?: it.javaClass.simpleName }
+        (listOfNotNull(operation, readerError) + streams.map { (source, failure) -> failure.describe(source) })
+            .takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }.stateIn(scope, SharingStarted.Eagerly, null)
 
 
-    /** A backwards page is in flight; the transcript shows a spinner and suppresses re-entry. */
-    private val _loadingOlder = MutableStateFlow(false)
-    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
-
-    /**
-     * The last backwards page failed.
-     *
-     * Paging is driven by scroll position, and `snapshotFlow` only emits distinct values — with the
-     * index unchanged after a failure nothing re-fires until the reader scrolls again. So the retry
-     * has to be an affordance rather than an automatic repeat.
-     */
-    private val _loadOlderFailed = MutableStateFlow(false)
-    val loadOlderFailed: StateFlow<Boolean> = _loadOlderFailed.asStateFlow()
+    val loadingOlder: StateFlow<Boolean> = historyReader.state.map { it.loading == HistoryDirection.OLDER }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+    val loadOlderFailed: StateFlow<Boolean> = historyReader.state.map { it.failed == HistoryDirection.OLDER }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+    val loadingNewer: StateFlow<Boolean> = historyReader.state.map { it.loading == HistoryDirection.NEWER }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+    val loadNewerFailed: StateFlow<Boolean> = historyReader.state.map { it.failed == HistoryDirection.NEWER }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     private val _subagents = MutableStateFlow<List<SubagentListEntry>>(emptyList())
     val subagents: StateFlow<List<SubagentListEntry>> = _subagents.asStateFlow()
@@ -587,46 +600,14 @@ class SessionStore @Inject constructor(
     private val approvalRequests = HashMap<String, ApprovalRequest>() // eventId -> request
     private val questionEvents = PendingQuestionRegistry()
 
-    // Open-session fold state.
+    // Selection authority. Its epoch survives reconnect but retires A -> B -> A requests.
     private var currentId: String? = null
     private var historyHost: String? = null
-    private var historyOpenEpoch = 0L
-    private var historyCacheTicket = 0L
-    private var historySaveJob: Job? = null
-    private val currentEvents = ArrayList<SessionEventEnvelope>()
-    private var currentEventsRevision = 0L
-    private var currentWindowBytes = 0L
-    private var currentOversizedWindow = false
-    private var historyAnchorSeq: Long? = null
-    private var historyAtTail = true
-    private var currentHasNewer = false
-    private var currentLegacyWindow = false
-    private var historyViewportRequest = 0L
-    private var latestObservedHistorySeq = -1L
-    private var knownFirstHistorySeq: Long? = null
-    private var followStreamEpoch = 0L
-    private var remoteHasOlder = false
-    private var remoteOldestSeq: Long? = null
-    private val _loadingNewer = MutableStateFlow(false)
-    val loadingNewer = _loadingNewer.asStateFlow()
-    private val _loadNewerFailed = MutableStateFlow(false)
-    val loadNewerFailed = _loadNewerFailed.asStateFlow()
+    private var sessionSelectionEpoch = 0L
     private val baselineReady = MutableStateFlow<String?>(null)
-    private var foldedHistoryRevision = -1L
-    private var foldedHistory: ConversationSnapshot? = null
-    private var currentHasMore = false
     private var currentBlank = true
     private val currentProjections = HashMap<String, ProjectionValue>()
     private var currentQueue = emptyList<QueueItem>()
-
-    /**
-     * The open session's follow cursor: the log cut its current stream generation opened at.
-     *
-     * `session/page` will not answer without it. Paging is pinned to the same cut the live tail
-     * started from, which is what lets an older page and the streaming tail be joined without a
-     * gap — so a page requested before the snapshot arrives has nothing to send and is skipped.
-     */
-    private var followCursor: Int? = null
 
     /**
      * The reply being written in the open session, as the follow stream's assistant frames show
@@ -639,14 +620,8 @@ class SessionStore @Inject constructor(
     private var followJob: Job? = null
     private var childFollowJob: Job? = null
 
-    /** Host-wide live control (queue, jobs, projections). One per connection generation. */
-    private var controlJob: Job? = null
-
     /** The open session's `job/list` stream (harness 0.1.7). Replaced with the open session. */
     private var jobsJob: Job? = null
-
-    /** Workspace registry stream. One per connection generation. */
-    private var workspaceJob: Job? = null
 
     private data class ApprovalRequest(
         val sessionId: String,
@@ -657,6 +632,13 @@ class SessionStore @Inject constructor(
     private data class ProjectionValue(val seq: Int, val value: JsonElement)
 
     init {
+        scope.launch {
+            historyReader.state.collect { history ->
+                synchronized(lock) {
+                    if (history.source?.let(::ownsReaderSource) == true) rebuildCurrentLocked()
+                }
+            }
+        }
         scope.launch {
             hostsStore.settings.map { it.historyCacheLimitBytes }.distinctUntilChanged().collect {
                 runCatching { historyCache.setLimitBytes(it) }
@@ -692,21 +674,7 @@ class SessionStore @Inject constructor(
         }
     }
 
-    /**
-     * Drives [rebuildCurrentLocked] for the live event stream, at most once per
-     * [REBUILD_INTERVAL_MS].
-     *
-     * A rebuild re-folds the whole transcript, so its cost is proportional to the length of the
-     * session. Running one per event made streaming quadratic: a turn arrives as a long run of
-     * `assistant/chunk` deltas, and each delta was re-folding every event before it and publishing
-     * a fresh snapshot for the transcript to recompose against. On a session of any size that
-     * allocated hundreds of megabytes a second and eventually exhausted the heap.
-     *
-     * The channel is conflated because a rebuild is idempotent and reads whatever state exists when
-     * it runs: a burst of deltas collapses into one rebuild, and no delta can be lost by it — the
-     * event is already in `currentEvents` before the tick is sent. The interval is a display frame
-     * rather than a debounce, so the tail of a stream still lands promptly.
-     */
+    /** Conflate transient assistant rendering; durable turn blocks are materialized by the reader. */
     private fun observeRebuildTicks() {
         scope.launch {
             for (tick in rebuildTicks) {
@@ -724,47 +692,35 @@ class SessionStore @Inject constructor(
 
     /** Never let another endpoint inherit the previous host's transcript or actionable session id. */
     private fun clearSelectedSessionLocked(stopHostStreams: Boolean = false) {
-        historySaveJob?.cancel()
         followJob?.cancel()
         closeSubagentTranscript()
         _subagentHistoryState.value = ArchivedTranscriptState()
         jobsJob?.cancel()
         if (stopHostStreams) {
-            controlJob?.cancel()
-            workspaceJob?.cancel()
+            hostStreams.stop()
+            permissionCatalog.value = null
+            permissionCatalogOrder.next()
             approvalRequests.clear()
             questionEvents.clear()
             modernQuestionKinds = emptyMap()
+            _plugins.value = null
+            _agentPresets.value = null
+            _contentSearchAvailable.value = true
+            _searchResults.value = emptyList()
+            searchQueryOrder.next()
         }
-        historyOpenEpoch++
+        sessionSelectionEpoch++
         currentId = null
-        latestObservedHistorySeq = -1L
         historyHost = null
-        followCursor = null
-        currentEvents.clear()
-        currentWindowBytes = 0
-        currentOversizedWindow = false
-        knownFirstHistorySeq = null
-        currentEventsRevision++
-        historyAnchorSeq = null
-        historyAtTail = true
-        currentHasNewer = false
-        currentLegacyWindow = false
-        historyViewportRequest++
-        _loadingOlder.value = false
-        _loadingNewer.value = false
-        _loadNewerFailed.value = false
-        remoteHasOlder = false
-        remoteOldestSeq = null
-        foldedHistory = null
+        historyReader.close()
         currentProjections.clear()
         currentQueue = emptyList()
-        currentHasMore = false
         currentBlank = true
         liveAssistant.clear()
         baselineReady.value = null
-        _currentSessionId.value = null
+        // Retire rendered data before publishing deselection to independent flow collectors.
         _currentConversation.value = null
+        _currentSessionId.value = null
         _jobs.value = emptyList()
         _skills.value = emptyList()
         _models.value = null
@@ -772,9 +728,9 @@ class SessionStore @Inject constructor(
         _subagentConversation.value = null
         _subagentMode.value = null
         _commands.value = emptyList()
+        _commandsAvailable.value = true
         _pendingPermission.value = null
         _pendingQuestions.value = null
-        _loadOlderFailed.value = false
         _connectionError.value = null
     }
 
@@ -808,10 +764,18 @@ class SessionStore @Inject constructor(
                 } else if (prev.phase == ConnectionPhase.CONNECTED && state.phase != ConnectionPhase.CONNECTED) questionSessions.disconnect()
                 val newGeneration = state.phase == ConnectionPhase.CONNECTED && state.clientId != null &&
                     state.clientId != prev.clientId
+                val lostConnection = prev.phase == ConnectionPhase.CONNECTED && state.phase != ConnectionPhase.CONNECTED
                 prev = state
                 if (state.phase != ConnectionPhase.CONNECTED) {
                     baselineReady.value = null
                     baselineJob?.cancel()
+                    synchronized(lock) {
+                        hostStreams.stop()
+                        if (lostConnection) {
+                            historyReader.disconnect()
+                            rebuildCurrentLocked()
+                        }
+                    }
                 }
                 if (newGeneration) {
                     probeFeatures()
@@ -839,28 +803,25 @@ class SessionStore @Inject constructor(
      * the generation, because a stream's items are only meaningful within the socket that carries
      * them.
      */
-    private fun startHostStreams() {
-        val mux = connectionManager.generation?.mux ?: return
-        controlJob?.cancel()
-        // Preset watermarks are log positions as this host reported them. A harness restored from
-        // an older snapshot can hand back the same session ids at lower positions, so the new
-        // stream's baseline and the list read that follows start them over.
-        synchronized(lock) { presetBySession.clear() }
-        controlJob = scope.launch {
-            runCatching {
+    private fun startHostStreams() = synchronized(lock) {
+        val owner = readOwner() ?: return@synchronized
+        val mux = muxForHost(owner.host) ?: return@synchronized
+        // Preset watermarks are generation-local; reconnect baselines may move them backwards.
+        presetBySession.clear()
+        hostStreams.start(listOf(
+            HostStreamSource("session/control") { publish ->
                 mux.openStream("session/control").collect { item ->
-                    decodeOrNull(SessionControlFrameSerializer, item)?.let { handleControlFrame(it) }
+                    publish { handleControlFrame(decodeFromJsonElement(SessionControlFrameSerializer, item)) }
                 }
-            }.onFailure { log("session/control ended", it) }
-        }
-        workspaceJob?.cancel()
-        workspaceJob = scope.launch {
-            runCatching {
+            },
+            HostStreamSource("workspace/follow") { publish ->
                 mux.openStream("workspace/follow").collect { item ->
-                    decodeOrNull(WorkspaceFollowFrameSerializer, item)?.let { handleWorkspaceFrame(it) }
+                    publish { handleWorkspaceFrame(decodeFromJsonElement(WorkspaceFollowFrameSerializer, item)) }
                 }
-            }.onFailure { log("workspace/follow ended", it) }
-        }
+            },
+        ), owns = { connectionManager.state.value.phase == ConnectionPhase.CONNECTED &&
+            owner.owns(readOwner()) && muxForHost(owner.host) === mux },
+            alive = { mux.failure == null })
     }
 
     /** Decode one stream item, or null when it does not match the expected frame union. */
@@ -1297,7 +1258,7 @@ class SessionStore @Inject constructor(
                     seq = envelope.seq,
                     surfaceOp = envelope.surfaceOp,
                 )
-                appendCurrentEventLocked(envelope)
+                // Durable publication comes from SessionHistoryReader after this live settlement is retired.
             }
         }
     }
@@ -1506,540 +1467,41 @@ class SessionStore @Inject constructor(
         if (_connectionError.value != null) _connectionError.value = null
     }
 
-    // ------------------------------------------------------------------ open-session fold
-    /**
-     * Fold one freshly-streamed event into the open session.
-     *
-     * The common case by far is a strictly-increasing append, which is why it is checked first:
-     * the scan-and-sort below is O(n log n) and used to run for every delta of every turn. Out of
-     * order or repeated sequence numbers still take the slow path, which is what makes a
-     * re-delivery after a reconnect land in the right place.
-     *
-     * The rebuild is requested rather than performed — see [observeRebuildTicks].
-     */
-    // Namespace the archive key, NEVER the connection/bookmark host identity.
-    private var readerMode = false
-    private var readerNextBeforeSeq: Int? = null
-    private fun historyArchiveKey(sid: String): String = if (readerMode) "reader-v1\u0000$sid" else sid
-    private fun readerRequest(request: SessionPageRequest): SessionPageRequest = if (!readerMode) request else
-        request.copy(view = READER_VIEW, maxRows = READER_MAX_ROWS, maxBytes = READER_MAX_BYTES, maxMessages = null)
+    // ------------------------------------------------------------ reader facade / live composition
+    private fun ownsReaderSelection(source: ReaderSource): Boolean = source.host == historyHost &&
+        source.host == activeHostKey && source.sessionId == currentId && source.selectionEpoch == sessionSelectionEpoch
 
-    private fun observeHistoryBoundsLocked(first: Long?, last: Long?) {
-        if (first != null) knownFirstHistorySeq = knownFirstHistorySeq?.let { minOf(it, first) } ?: first
-        if (last != null) latestObservedHistorySeq = maxOf(latestObservedHistorySeq, last)
+    private fun ownsReaderSource(source: ReaderSource): Boolean = ownsReaderSelection(source) &&
+        source.api === connectionManager.connectedApi
+
+    private suspend fun refreshReaderFollow(source: ReaderSource): Boolean {
+        val waiting = CompletableDeferred<Boolean>()
+        synchronized(lock) {
+            if (!ownsReaderSource(source) || source.api == null || muxForHost(source.host) == null) {
+                setConnectionError("Latest history is not available while reconnecting")
+                return false
+            }
+            startFollow(source.sessionId, waiting)
+        }
+        return try { waiting.await() } finally { waiting.complete(false) }
     }
 
-    private fun commitHistoryPageLocked(summary: HistoryPageFetchSummary, commit: () -> Boolean): Boolean =
-        commit().also { if (it) observeHistoryBoundsLocked(summary.firstSeq, summary.lastSeq) }
-
-    private fun appendCurrentEventLocked(envelope: SessionEventEnvelope) {
-        val host = historyHost
-        val sid = currentId
-        // One encoding is shared by durable insertion and RAM accounting. Choosing the fresh epoch
-        // happens inside the cache lock, so a concurrent clear cannot reject an accepted live event.
-        val bytes = if (host != null && sid != null) historyCache.storeLiveEvent(host, historyArchiveKey(sid), envelope)
-            else encodeHistoryEvent(envelope).payload.size.toLong()
-        if (!currentHasNewer || envelope.seq <= (currentEvents.lastOrNull()?.seq ?: -1L)) {
-            val lastSeq = currentEvents.lastOrNull()?.seq
-            if (lastSeq == null || envelope.seq > lastSeq) {
-                currentEvents.add(envelope)
-                currentWindowBytes += bytes
-            } else {
-                val index = currentEvents.indexOfFirst { it.seq == envelope.seq }
-                if (index >= 0) {
-                    currentWindowBytes += bytes - encodeHistoryEvent(currentEvents[index]).payload.size
-                    currentEvents[index] = envelope
-                } else {
-                    currentEvents.add(envelope)
-                    currentWindowBytes += bytes
-                    currentEvents.sortBy { it.seq }
-                }
-            }
-            currentEventsRevision++
-        }
-        observeHistoryBoundsLocked(envelope.seq, envelope.seq)
-        val messageBoundary = HistoryWindowBudget.isMessageBoundary(envelope.type)
-        val highMessages = HistoryWindowBudget.TAIL_HIGH_MESSAGES
-        val rollover = if (readerMode) currentEvents.size > READER_MAX_ROWS ||
-            (currentEvents.size > 1 && currentWindowBytes > READER_MAX_BYTES)
-            else if (currentLegacyWindow) envelope.type == "user/message"
-            else currentEvents.size.toLong() > HistoryWindowBudget.rawEvents(highMessages) ||
-                (currentWindowBytes > HistoryWindowBudget.payloadBytes(highMessages) &&
-                    (!currentOversizedWindow || envelope.type !in com.labteto.dshmobile.core.session.STRUCTURAL_EVENT_TYPES)) || (messageBoundary &&
-                currentEvents.count { HistoryWindowBudget.isMessageBoundary(it.type) } > highMessages)
-        if (host != null && sid != null && rollover) {
-            val liveTicket = historyCache.ticket()
-            historyCache.atTicket(liveTicket) {
-                val anchor = historyAnchorSeq ?: currentEvents.first().seq
-                // Reload below the high watermark once, rather than decoding the same 8000-event
-                // viewport for every following tool frame. No archived content is evicted.
-                val page = if (historyAtTail) historyCache.latestHistory(host, historyArchiveKey(sid),
-                    HistoryWindowBudget.TAIL_LOW_MESSAGES, liveTicket)
-                else historyCache.historyAround(host, historyArchiveKey(sid), anchor, highMessages, liveTicket)
-                if (page.events.isNotEmpty() && (historyAtTail || anchor in page.firstSeq!!..page.lastSeq!!))
-                    installHistoryWindowLocked(page)
-            }
-        }
-        scheduleHistorySaveLocked()
-        rebuildTicks.trySend(Unit)
-    }
-
-    /** Record intent without moving the reader; only complete off-screen pages may leave RAM. */
-    fun updateHistoryViewport(anchorSeq: Long?, atTail: Boolean) = synchronized(lock) {
-        // Layout/structural transitions can briefly expose no semantic row. They must not
-        // erase the last reading anchor and make reconnect select the latest window.
-        if (anchorSeq != null) historyAnchorSeq = anchorSeq
-        historyAtTail = atTail && !currentHasNewer
-    }
-
-    internal fun captureHistoryViewport(): HistoryViewportBookmark? = synchronized(lock) {
-        val host = historyHost ?: return@synchronized null
-        val sid = currentId ?: return@synchronized null
-        HistoryViewportBookmark(historyAtTail, historyAnchorSeq, host, sid, historyOpenEpoch,
-            currentEvents.toList(), currentHasMore, currentHasNewer, currentLegacyWindow, historyCacheTicket, currentWindowBytes)
-    }
-
-    /** Restore presentation only. A saved window never restores projections, queues or approvals. */
-    internal suspend fun restoreHistoryViewport(bookmark: HistoryViewportBookmark): Boolean = withContext(Dispatchers.Default) {
-        var storageFailure: Exception? = null
-        val restored = synchronized(lock) {
-            if (historyHost != bookmark.host || activeHostKey != bookmark.host || currentId != bookmark.sessionId ||
-                historyOpenEpoch != bookmark.openEpoch) return@synchronized false
-            historyViewportRequest++
-            _loadingOlder.value = false
-            _loadingNewer.value = false
-            _loadOlderFailed.value = false
-            _loadNewerFailed.value = false
-            historyAtTail = bookmark.followingTail
-            historyAnchorSeq = bookmark.anchorSeq
-            val fresh = try {
-                val ticket = historyCache.ticket()
-                historyCache.atTicket(ticket) {
-                    val page = if (bookmark.followingTail || bookmark.anchorSeq == null)
-                        historyCache.latestHistory(bookmark.host, historyArchiveKey(bookmark.sessionId), HISTORY_PAGE_SIZE * 2, ticket)
-                    else historyCache.historyAround(bookmark.host, historyArchiveKey(bookmark.sessionId), bookmark.anchorSeq, HISTORY_PAGE_SIZE * 2, ticket)
-                    val containsAnchor = bookmark.anchorSeq == null || page.events.any { it.seq == bookmark.anchorSeq }
-                    if (page.events.isEmpty() || (!bookmark.followingTail && !containsAnchor)) false
-                    else {
-                        installHistoryWindowLocked(page)
-                        historyCacheTicket = ticket
-                        rebuildCurrentLocked()
-                        true
-                    }
-                } ?: false
-            } catch (failure: Exception) {
-                if (failure !is java.io.IOException && failure !is android.database.sqlite.SQLiteException) throw failure
-                storageFailure = failure
-                false
-            }
-            if (!fresh) {
-                val retained = if (followCursor != null) bookmark.events.filter { it.seq <= latestObservedHistorySeq }
-                    else bookmark.events
-                val fallback = retained.ifEmpty { currentEvents.filter { it.seq <= latestObservedHistorySeq } }
-                currentEvents.clear()
-                currentEvents.addAll(fallback)
-                currentWindowBytes = if (retained.isNotEmpty() && retained.size == bookmark.events.size)
-                    bookmark.payloadBytes else fallback.sumOf { encodeHistoryEvent(it).payload.size.toLong() }
-                currentOversizedWindow = currentWindowBytes > HistoryWindowBudget.payloadBytes(HistoryWindowBudget.TAIL_HIGH_MESSAGES)
-                observeHistoryBoundsLocked(fallback.firstOrNull()?.seq, fallback.lastOrNull()?.seq)
-                currentEventsRevision++
-                currentLegacyWindow = bookmark.legacy
-                currentHasMore = bookmark.hasOlder || knownFirstHistorySeq?.let { first ->
-                    (fallback.firstOrNull()?.seq ?: first) > first } == true
-                currentHasNewer = bookmark.hasNewer || latestObservedHistorySeq > (fallback.lastOrNull()?.seq ?: -1L)
-                // A clear invalidated this ticket. Never re-cache the saved RAM fallback under a
-                // newer sheet read's ticket when saveHistoryLocked runs on the next live event.
-                historyCacheTicket = bookmark.cacheTicket
-                rebuildCurrentLocked()
-            }
-            true
-        }
-        storageFailure?.let { failure ->
-            log("could not restore cached viewport; retained RAM bookmark", failure)
-            setConnectionError(failure.message)
-            connectionManager.reportStorageFailure(failure)
-        }
-        restored
-    }
-
-    private fun installHistoryWindowLocked(page: HistoryDiskPage) {
-        currentEvents.clear()
-        currentEvents.addAll(page.events)
-        currentWindowBytes = page.payloadBytes
-        currentOversizedWindow = currentWindowBytes > HistoryWindowBudget.payloadBytes(HistoryWindowBudget.TAIL_HIGH_MESSAGES)
-        observeHistoryBoundsLocked(page.firstSeq, page.lastSeq)
-        currentLegacyWindow = page.legacyUnbounded
-        currentEventsRevision++
-        currentHasNewer = page.hasNewer || latestObservedHistorySeq > (page.lastSeq ?: -1L)
-        currentHasMore = page.hasOlder || knownFirstHistorySeq?.let { first ->
-            (page.firstSeq ?: first) > first } == true || (remoteHasOlder &&
-            (remoteOldestSeq == null || (page.firstSeq ?: Long.MAX_VALUE) >= remoteOldestSeq!!))
-    }
-
-    private fun markCurrentHistoryAtTailLocked() {
-        historyAtTail = true
-        historyAnchorSeq = currentEvents.lastOrNull()?.seq
-        currentHasNewer = false
-        currentHasMore = currentHasMore || knownFirstHistorySeq?.let { first ->
-            (currentEvents.firstOrNull()?.seq ?: first) > first } == true
-        if (followCursor == null) _currentConversation.value = _currentConversation.value?.copy(
-            hasMore = currentHasMore, hasNewer = false)
-        else rebuildCurrentLocked()
-        clearConnectionError()
-        historyViewportRequest++
-        _loadingOlder.value = false
-        _loadingNewer.value = false
-        _loadNewerFailed.value = false
-    }
-
-    /** A partial post-clear cache is not the live tail. Only report success after actually landing. */
-    suspend fun showLatestHistory(): Boolean = withContext(Dispatchers.Default) {
-        var selected: Triple<String, String, Long>? = null
-        var completion: CompletableDeferred<Boolean>? = null
-        var pendingViewport: Long? = null
-        try {
-            val immediate = synchronized(lock) {
-                val host = historyHost ?: return@synchronized false
-                val sid = currentId ?: return@synchronized false
-                selected = Triple(host, sid, historyOpenEpoch)
-                val ramLast = currentEvents.lastOrNull()?.seq ?: -1L
-                if (!currentHasNewer && ramLast >= latestObservedHistorySeq &&
-                    (currentEvents.isNotEmpty() || followCursor == -1)) {
-                    markCurrentHistoryAtTailLocked()
-                    return@synchronized true
-                }
-                val ticket = historyCache.ticket()
-                val installed = historyCache.atTicket(ticket) {
-                    val page = historyCache.latestHistory(host, historyArchiveKey(sid), HISTORY_PAGE_SIZE * 2, ticket)
-                    if (page.events.isEmpty() || (page.lastSeq ?: -1L) < latestObservedHistorySeq) false
-                    else {
-                        installHistoryWindowLocked(page)
-                        markCurrentHistoryAtTailLocked()
-                        true
-                    }
-                } ?: false
-                if (installed) return@synchronized true
-                if (connectionManager.connectedApi == null || muxForHost(host) == null) {
-                    setConnectionError("Latest history is not available while reconnecting")
-                    return@synchronized false
-                }
-                val waiting = CompletableDeferred<Boolean>()
-                completion = waiting
-                historySaveJob?.cancel()
-                historyCacheTicket = ticket // an explicit read request, never an automatic refill
-                pendingViewport = ++historyViewportRequest
-                _loadingOlder.value = false
-                _loadingNewer.value = true
-                _loadNewerFailed.value = false
-                startFollow(sid, waiting)
-                false
-            }
-            if (immediate) true else completion?.await() ?: false
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            completion?.complete(false)
-            throw cancelled
-        } catch (failure: Exception) {
-            completion?.complete(false)
-            synchronized(lock) {
-                selected?.let { (host, sid, epoch) ->
-                    if (historyHost == host && currentId == sid && historyOpenEpoch == epoch)
-                        setConnectionError(failure.message)
-                }
-            }
-            if (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException)
-                connectionManager.reportStorageFailure(failure)
-            false
-        } finally {
-            completion?.complete(false)
-            synchronized(lock) {
-                if (pendingViewport != null && pendingViewport == historyViewportRequest) _loadingNewer.value = false
-            }
-        }
-    }
-
-    private data class HistoryTurnRead(
-        val host: String, val sid: String, val epoch: Long, val token: Long,
-        val api: DshApiClient?, val cursor: Int?, val ticket: Long, val followEpoch: Long,
-    )
-
-    private fun ownsHistoryTurnRead(read: HistoryTurnRead, checkTicket: Boolean = true): Boolean =
-        read.host == historyHost && read.host == activeHostKey && read.sid == currentId &&
-            read.epoch == historyOpenEpoch && read.token == historyViewportRequest &&
-            read.api === connectionManager.connectedApi && read.cursor == followCursor &&
-            read.followEpoch == followStreamEpoch && (!checkTicket || read.ticket == historyCache.ticket())
-
-    /**
-     * Jump directly to a turn-outline sequence, without paging across the intervening transcript.
-     * A cached start alone is not a hydrated turn: prefer a contiguous window containing its prompt
-     * (which can occur AFTER turn/start), otherwise fetch a small region around the requested seq.
-     * The archive stages network payloads on disk and applies its normal byte/event RAM budgets.
-     * True means the published conversation contains the exact start/prompt, not a nearby fallback.
-     */
-    suspend fun seekHistoryTurn(seq: Long): Boolean = withContext(Dispatchers.Default) {
-        if (seq < 0 || seq > Int.MAX_VALUE) return@withContext false
-        val context = currentCoroutineContext()
-        val read = synchronized(lock) {
-            val host = historyHost ?: return@withContext false
-            val sid = currentId ?: return@withContext false
-            if (host != activeHostKey) return@withContext false
-            historySaveJob?.cancel()
-            _loadingOlder.value = false
-            _loadingNewer.value = true // suppress automatic paging while the explicit seek owns it
-            HistoryTurnRead(host, sid, historyOpenEpoch, ++historyViewportRequest,
-                connectionManager.connectedApi, followCursor, historyCache.ticket(), followStreamEpoch)
-        }
-        fun fail(message: String): Boolean {
-            synchronized(lock) {
-                if (ownsHistoryTurnRead(read, checkTicket = false)) setConnectionError(message)
-            }
-            return false
-        }
-        fun install(remotePage: HistoryPageFetchSummary? = null): Boolean = synchronized(lock) {
-            context.ensureActive()
-            if (!ownsHistoryTurnRead(read)) return@synchronized false
-            historyCache.atTicket(read.ticket) {
-                val page = historyCache.historyAround(read.host, historyArchiveKey(read.sid), seq, HISTORY_PAGE_SIZE * 2, read.ticket)
-                val index = page.events.indexOfFirst { it.seq == seq &&
-                    (it.type == "turn/start" || it.type == "user/message") }
-                if (index < 0) return@atTicket false
-                // historyAround reads ONE indexed contiguous component (including legacy expansion),
-                // never stitching a start and prompt across a cache gap. A lone start is not enough.
-                val hasPrompt = page.events[index].type == "user/message" || page.events.asSequence()
-                    .drop(index + 1).takeWhile { it.type != "turn/start" }.any { it.type == "user/message" }
-                if (remotePage == null && !hasPrompt && page.lastSeq != read.cursor?.toLong()) return@atTicket false
-                // A jump can read NEWER than the oldest page already inspected. Do not replace
-                // that earlier boundary's hasMore proof with metadata about this later region.
-                if (remotePage?.firstSeq != null &&
-                    (remoteOldestSeq == null || remotePage.firstSeq <= remoteOldestSeq!!)) {
-                    remoteHasOlder = remotePage.metadata.hasMore
-                    remoteOldestSeq = remotePage.firstSeq
-                }
-                // Keep framing rows before the prompt; trimToUserPrompt would discard turn/start.
-                historyAtTail = false
-                historyAnchorSeq = seq
-                historyCacheTicket = read.ticket
-                installHistoryWindowLocked(page)
-                rebuildCurrentLocked()
-                val landed = _currentConversation.value?.let { snapshot ->
-                    snapshot.sessionId == read.sid && snapshot.nodes.any { it.seq == seq &&
-                        (it is com.labteto.dshmobile.core.session.TurnStartNode ||
-                            it is com.labteto.dshmobile.core.session.UserMessageNode) }
-                } == true
-                if (landed) {
-                    _loadOlderFailed.value = false
-                    _loadNewerFailed.value = false
-                    clearConnectionError()
-                }
-                landed
-            } ?: false
-        }
-        try {
-            if (install()) return@withContext true
-            if (!synchronized(lock) { ownsHistoryTurnRead(read) })
-                return@withContext fail("History changed; retry opening this turn")
-            val api = read.api ?: return@withContext fail("This turn is not available while reconnecting")
-            val cursor = read.cursor ?: return@withContext fail("This turn is waiting for a connected session snapshot")
-            if (seq > cursor) return@withContext fail("This turn is outside the current history snapshot")
-            // beforeSeq is exclusive; throughSeq remains the FOLLOW cursor, never the target seq.
-            // Look slightly ahead so a later user/message is included. If message-heavy pages do not
-            // reach the start, walk only this small target region backwards, never from the live tail.
-            var before = minOf(cursor.toLong() + 1, seq + HISTORY_PAGE_SIZE + 1)
-            while (true) {
-                context.ensureActive()
-                if (!synchronized(lock) { ownsHistoryTurnRead(read) })
-                    return@withContext fail("History changed; retry opening this turn")
-                val result = fetchStagedHistoryPage(api, historyCache, read.host, historyArchiveKey(read.sid), read.ticket,
-                    readerRequest(SessionPageRequest(SessionAddress.Session(sessionId = read.sid), cursor,
-                        beforeSeq = before.takeIf { it <= Int.MAX_VALUE }?.toInt(), maxMessages = HISTORY_PAGE_SIZE)),
-                ) { summary, commit ->
-                    context.ensureActive()
-                    synchronized(lock) {
-                        ownsHistoryTurnRead(read) && summary.firstSeq != null && summary.lastSeq != null &&
-                            summary.firstSeq < before && summary.lastSeq == before - 1 &&
-                            commitHistoryPageLocked(summary, commit)
-                    }
-                }
-                val page = when (result) {
-                    is RpcResult.Err -> return@withContext fail(result.error.message)
-                    is RpcResult.Ok -> result.value
-                }
-                if (!page.committed) return@withContext fail("The server did not return the requested turn region")
-                if (page.firstSeq!! <= seq) {
-                    return@withContext if (install(remotePage = page)) true
-                        else fail("The requested turn is not present in this history snapshot")
-                }
-                before = page.metadata.reader?.nextBeforeSeq?.toLong() ?: page.firstSeq
-            }
-            @Suppress("UNREACHABLE_CODE")
-            false
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (failure: Exception) {
-            fail(failure.message ?: "Could not open this history turn")
-            if (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException)
-                connectionManager.reportStorageFailure(failure)
-            false
-        } finally {
-            synchronized(lock) { if (historyViewportRequest == read.token) _loadingNewer.value = false }
-        }
-    }
-
-    private data class NewerHistoryRead(
-        val host: String, val sid: String, val epoch: Long, val token: Long,
-        val api: DshApiClient?, val cursor: Int?, val ticket: Long,
-        val anchor: Long, val windowEvents: Int,
-    )
-
-    private fun isCurrentNewerReadLocked(read: NewerHistoryRead, checkTicket: Boolean = true): Boolean =
-        read.token == historyViewportRequest && read.epoch == historyOpenEpoch && read.sid == currentId &&
-            read.host == historyHost && read.host == activeHostKey && read.api === connectionManager.connectedApi &&
-            read.cursor == followCursor && currentEvents.lastOrNull()?.seq == read.anchor &&
-            (!checkTicket || read.ticket == historyCache.ticket())
-
-    private fun failNewerRead(read: NewerHistoryRead, message: String) = synchronized(lock) {
-        if (isCurrentNewerReadLocked(read, checkTicket = false)) {
-            _loadNewerFailed.value = true
-            setConnectionError(message)
-        }
-    }
-
-    /** Install only an adjacent component; around(anchor+1) alone may select the old side of a gap. */
-    private fun installNewerHistoryLocked(read: NewerHistoryRead): Boolean {
-        if (!isCurrentNewerReadLocked(read)) return false
-        return historyCache.atTicket(read.ticket) {
-            val next = historyCache.newerHistory(read.host, historyArchiveKey(read.sid), read.anchor, HISTORY_PAGE_SIZE, read.ticket)
-            if (next.events.isEmpty() || next.firstSeq!! > read.anchor + 1) return@atTicket false
-            val page = historyCache.historyAround(read.host, historyArchiveKey(read.sid), read.anchor + 1, HISTORY_PAGE_SIZE * 2, read.ticket)
-            if ((page.lastSeq ?: Long.MIN_VALUE) <= read.anchor) return@atTicket false
-            historyAtTail = false
-            installHistoryWindowLocked(page)
-            rebuildCurrentLocked()
-            clearConnectionError()
-            _loadNewerFailed.value = false
-            true
-        } ?: false
-    }
-
-    /** Automatic callers stop after failure; a retry button calls this method again deliberately. */
-    suspend fun loadNewer() = withContext(Dispatchers.Default) {
-        val read = synchronized(lock) {
-            if (_loadingOlder.value || !_loadingNewer.compareAndSet(false, true)) return@withContext
-            _loadNewerFailed.value = false
-            val host = historyHost
-            val sid = currentId
-            val anchor = currentEvents.lastOrNull()?.seq
-            if (host == null || sid == null || anchor == null || !currentHasNewer) {
-                _loadingNewer.value = false
-                return@withContext
-            }
-            NewerHistoryRead(host, sid, historyOpenEpoch, ++historyViewportRequest,
-                connectionManager.connectedApi, followCursor, historyCache.ticket(), anchor, currentEvents.size)
-        }
-        try {
-            if (synchronized(lock) { installNewerHistoryLocked(read) }) return@withContext
-            if (!synchronized(lock) { isCurrentNewerReadLocked(read) }) {
-                failNewerRead(read, "Local history changed; retry loading newer history")
-                return@withContext
-            }
-            val cursor = read.cursor
-            if (read.api == null || cursor == null) {
-                failNewerRead(read, "Newer history is waiting for a connected session snapshot")
-                return@withContext
-            }
-            if (read.anchor >= cursor.toLong()) {
-                synchronized(lock) {
-                    if (isCurrentNewerReadLocked(read)) {
-                        _loadNewerFailed.value = true
-                        historyAtTail = false
-                        if (historyAnchorSeq == null) historyAnchorSeq = currentEvents.firstOrNull()?.seq
-                        // This is a deliberate read request after a cache clear, not automatic refill.
-                        historyCacheTicket = read.ticket
-                        startFollow(read.sid)
-                    }
-                }
-                return@withContext
-            }
-            fetchNewerHistoryGap(read)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (failure: Exception) {
-            failNewerRead(read, failure.message ?: "Could not load newer history")
-            if (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException)
-                connectionManager.reportStorageFailure(failure)
-        } finally {
-            synchronized(lock) { if (historyViewportRequest == read.token) _loadingNewer.value = false }
-        }
-    }
-
-    private suspend fun fetchNewerHistoryGap(read: NewerHistoryRead) {
-        val api = read.api ?: return
-        val cursor = read.cursor ?: return
-        // Read near the viewport, not backwards from an arbitrarily distant cached component.
-        var before = minOf(cursor.toLong() + 1, read.anchor + read.windowEvents.coerceAtLeast(1).toLong() + 1)
-        while (true) {
-            if (!synchronized(lock) { isCurrentNewerReadLocked(read) }) {
-                failNewerRead(read, "Local history changed; retry loading newer history")
-                return
-            }
-            val result = fetchStagedHistoryPage(api, historyCache, read.host, historyArchiveKey(read.sid), read.ticket,
-                readerRequest(SessionPageRequest(address = SessionAddress.Session(sessionId = read.sid), throughSeq = cursor,
-                    beforeSeq = before.takeIf { it <= Int.MAX_VALUE }?.toInt(), maxMessages = HISTORY_PAGE_SIZE)),
-            ) { summary, commit ->
-                synchronized(lock) {
-                    if (!isCurrentNewerReadLocked(read) || summary.firstSeq == null || summary.lastSeq == null ||
-                        summary.firstSeq >= before) false else commitHistoryPageLocked(summary, commit)
-                }
-            }
-            val page = when (result) {
-                is RpcResult.Err -> { failNewerRead(read, result.error.message); return }
-                is RpcResult.Ok -> result.value
-            }
-            val min = page.firstSeq
-            if (min == null || page.lastSeq == null || min >= before) {
-                failNewerRead(read, "The server returned no progress while loading newer history")
-                return
-            }
-            if (!page.committed) {
-                failNewerRead(read, "Local history changed; retry loading newer history")
-                return
-            }
-            if (synchronized(lock) { installNewerHistoryLocked(read) }) return
-            if (!synchronized(lock) { isCurrentNewerReadLocked(read) }) {
-                failNewerRead(read, "Local history changed; retry loading newer history")
-                return
-            }
-            if (min <= read.anchor + 1) {
-                failNewerRead(read, "The server page did not cover the next history event")
-                return
-            }
-            // Strictly decreasing until the event next to the viewport is covered. Empty and
-            // no-progress pages fail above; there is no automatic network retry loop on error.
-            before = page.metadata.reader?.nextBeforeSeq?.toLong() ?: min
-        }
-    }
-
-    private fun saveHistoryLocked() {
-        if (followCursor == null || historyHost != activeHostKey) return
-        val host = historyHost ?: return
-        val sid = currentId ?: return
-        val ticket = historyCacheTicket
-        val events = trimToUserPrompt(historyTail(currentEvents.toList()))
-        val archiveKey = historyArchiveKey(sid)
-        scope.launch {
-            runCatching { historyCache.write(host, archiveKey, ticket, events) }
-        }
-    }
-
-    private fun scheduleHistorySaveLocked() {
-        historySaveJob?.cancel()
-        historySaveJob = scope.launch {
-            delay(350)
-            synchronized(lock) { saveHistoryLocked() }
-        }
+    fun updateHistoryViewport(anchorSeq: Long?, atTail: Boolean) = historyReader.updateViewport(anchorSeq, atTail)
+    internal fun captureHistoryViewport(): HistoryViewportBookmark? = historyReader.captureViewport()
+    internal suspend fun restoreHistoryViewport(bookmark: HistoryViewportBookmark): Boolean = historyReader.restoreViewport(bookmark)
+    suspend fun showLatestHistory(): Boolean = historyReader.latest()
+    suspend fun seekHistoryTurn(seq: Long): Boolean = historyReader.seek(seq)
+    suspend fun loadNewer() = historyReader.loadNewer()
+    suspend fun loadHistoryJournal(): List<SessionEventEnvelope> {
+        val range = historyReader.state.value.loadedRange ?: return emptyList()
+        return historyReader.readEvents(range.first, range.last)
     }
 
     private fun mergeProjectionLocked(key: String, seq: Int, value: JsonElement) {
         val existing = currentProjections[key]
         if (existing == null || seq >= existing.seq) {
             currentProjections[key] = ProjectionValue(seq, value)
+            if (key == "turnOutline") historyReader.updateOutline(value)
             currentId?.let { sid ->
                 if (key == "userQuestions") questionSessions.projection(sid, seq, value)
                 if (key == "inbox") questionSessions.inbox(sid, value)
@@ -2048,22 +1510,16 @@ class SessionStore @Inject constructor(
     }
 
     private fun rebuildCurrentLocked() {
-        // The preview is presentation only. Host control updates must not replace it with an
-        // empty fold or mix cached events into a new follow generation.
         val sid = currentId ?: return
-        if (followCursor == null) {
-            if (currentEvents.isNotEmpty()) _currentConversation.value = historyPreview(sid, currentEvents)
-                .copy(hasMore = currentHasMore, hasNewer = currentHasNewer)
+        val history = historyReader.state.value
+        if (history.source?.let(::ownsReaderSelection) != true) return
+        val durable = history.snapshot ?: return
+        if (history.cut == null) {
+            _currentConversation.value = durable
             return
         }
-        val fold = EventFold(sid)
-        if (foldedHistoryRevision != currentEventsRevision || foldedHistory?.sessionId != sid) {
-            foldedHistory = fold.fold(currentEvents.toList())
-            foldedHistoryRevision = currentEventsRevision
-        }
-        val durable = foldedHistory ?: return
-        val snapshot = if (currentHasNewer) durable else liveAssistant.transientSnapshot(durable)
-        val blank = if (currentEvents.isEmpty()) currentBlank else snapshot.blank
+        val snapshot = if (history.hasNewer) durable else liveAssistant.transientSnapshot(durable)
+        val blank = if (history.loadedRange == null) currentBlank else snapshot.blank
         val running = runningBySession[sid] ?: snapshot.running
         // The queue is the `inbox` projection wherever the host publishes one — it reaches us from
         // both the control stream and the follow snapshot, whichever is ahead. `currentQueue` is
@@ -2077,8 +1533,8 @@ class SessionStore @Inject constructor(
         val merged = snapshot.copy(
             blank = blank,
             running = running,
-            hasMore = currentHasMore,
-            hasNewer = currentHasNewer,
+            hasMore = history.hasOlder,
+            hasNewer = history.hasNewer,
             queue = queue,
             projections = currentProjections.mapValues { it.value.value },
         )
@@ -2204,44 +1660,18 @@ class SessionStore @Inject constructor(
         val api = connectionManager.connectedApi
         if (expectedClientId != null && api == null) return@withContext
         val host = activeHostKey ?: return@withContext
-        _loadOlderFailed.value = false
         synchronized(lock) {
             if (host != activeHostKey || api !== connectionManager.connectedApi ||
                 (expectedClientId != null && expectedClientId != connectionManager.state.value.clientId)) return@withContext
-            saveHistoryLocked()
-            historySaveJob?.cancel()
             followJob?.cancel()
             val same = currentId == sessionId && historyHost == host
-            historyOpenEpoch++
-            historyHost = host
-            historyCacheTicket = historyCache.ticket()
-            followCursor = null
-            currentId = sessionId
-            latestObservedHistorySeq = -1L
-            _currentSessionId.value = sessionId
-            currentEvents.clear()
-            currentWindowBytes = 0
-            currentOversizedWindow = false
-            knownFirstHistorySeq = null
-            currentEventsRevision++
-            historyAnchorSeq = null
-            historyAtTail = true
-            currentHasNewer = false
-            currentLegacyWindow = false
-            historyViewportRequest++
-            _loadingOlder.value = false
-            _loadingNewer.value = false
-            _loadNewerFailed.value = false
-            remoteHasOlder = false
-            remoteOldestSeq = null
-            foldedHistory = null
-            currentHasMore = false
-            currentBlank = sessionRows[sessionId]?.blank ?: true
-            currentProjections.clear()
-            currentQueue = emptyList()
-            liveAssistant.clear()
-            _currentConversation.value = null
             if (!same) {
+                sessionSelectionEpoch++
+                historyHost = host
+                currentId = sessionId
+                _currentSessionId.value = sessionId
+                currentBlank = sessionRows[sessionId]?.blank ?: true
+                _currentConversation.value = null
                 closeSubagentTranscript()
                 _subagentHistoryState.value = ArchivedTranscriptState()
                 _jobs.value = emptyList()
@@ -2251,8 +1681,12 @@ class SessionStore @Inject constructor(
                 _subagentConversation.value = null
                 _subagentMode.value = null
                 _commands.value = emptyList()
+                _commandsAvailable.value = true
                 _pendingPermission.value = null
             }
+            currentProjections.clear()
+            currentQueue = emptyList()
+            liveAssistant.clear()
             startFollow(sessionId)
             startJobs(sessionId)
         }
@@ -2292,127 +1726,73 @@ class SessionStore @Inject constructor(
      */
     private fun startFollow(sessionId: String) = startFollow(sessionId, null)
 
-    /** latestCompletion belongs only to an explicit jump, not to the lifetime of the live follow. */
+    /** The Store owns live authority; the reader owns durable data and every history-read lifetime. */
     private fun startFollow(sessionId: String, latestCompletion: CompletableDeferred<Boolean>?) {
         followJob?.cancel()
-        readerMode = true
-        readerNextBeforeSeq = null
-        followCursor = null
         val host = historyHost ?: run { latestCompletion?.complete(false); return }
-        val epoch = historyOpenEpoch
-        val ticket = historyCacheTicket
-        val streamEpoch = ++followStreamEpoch
-        val requestedViewport = historyViewportRequest
-        fun isCurrent() = historyOpenEpoch == epoch && currentId == sessionId && activeHostKey == host &&
-            followStreamEpoch == streamEpoch
-        if (latestCompletion == null) scope.launch {
-            try {
-                val anchor = synchronized(lock) { historyAnchorSeq?.takeIf { !historyAtTail } }
-                val archived = if (anchor == null) historyCache.latestHistory(host, historyArchiveKey(sessionId), INITIAL_FOLLOW_MESSAGES, ticket)
-                    else historyCache.historyAround(host, historyArchiveKey(sessionId), anchor, HISTORY_PAGE_SIZE * 2, ticket)
-                // Do not eagerly deserialize an old full-window preview just to open the tail.
-                val cached = archived.events.takeIf { it.isNotEmpty() } ?: return@launch
-                val bytes = archived.payloadBytes
-                synchronized(lock) {
-                    if (isCurrent() && followCursor == null) historyCache.atTicket(ticket) {
-                        currentEvents.clear()
-                        currentEvents.addAll(cached)
-                        currentWindowBytes = bytes
-                        currentOversizedWindow = currentWindowBytes > HistoryWindowBudget.payloadBytes(HistoryWindowBudget.TAIL_HIGH_MESSAGES)
-                        observeHistoryBoundsLocked(cached.firstOrNull()?.seq, cached.lastOrNull()?.seq)
-                        currentLegacyWindow = archived.legacyUnbounded || cached.any { it.type == "assistant/chunk" }
-                        currentEventsRevision++
-                        currentHasMore = archived.hasOlder || knownFirstHistorySeq?.let { first ->
-                            (cached.firstOrNull()?.seq ?: first) > first } == true
-                        currentHasNewer = archived.hasNewer || latestObservedHistorySeq > (cached.lastOrNull()?.seq ?: -1L)
-                        _currentConversation.value = historyPreview(sessionId, cached).copy(
-                            hasMore = currentHasMore, hasNewer = currentHasNewer)
-                    }
-                }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (failure: Exception) {
-                log("could not read local history", failure)
-                if (isCurrent()) setConnectionError(failure.message)
-            }
-        }
-        val api = connectionManager.connectedApi ?: run { latestCompletion?.complete(false); return }
-        val mux = connectionManager.generation?.mux
-        if (mux == null) {
-            log("cannot follow $sessionId: no connection generation")
-            latestCompletion?.complete(false)
-            return
-        }
-        fun isCurrentFollow() = isCurrent() && api === connectionManager.connectedApi && muxForHost(host) === mux && mux.failure == null
+        val api = connectionManager.connectedApi
+        val source = ReaderSource(host, sessionId, sessionSelectionEpoch, api)
+        val token = historyReader.beginFollow(source, loadingLatest = latestCompletion != null)
+        if (api == null) { latestCompletion?.complete(false); return }
+        val mux = muxForHost(host) ?: run { latestCompletion?.complete(false); return }
+        fun isCurrent() = ownsReaderSource(source) && historyReader.isCurrent(token) &&
+            muxForHost(host) === mux && mux.failure == null
         val args = buildJsonObject {
             put("request", encodeToJsonElement(SessionFollowRequest.serializer(), SessionFollowRequest(
                 address = SessionAddress.Session(sessionId = sessionId),
                 maxRows = READER_MAX_ROWS, maxBytes = READER_MAX_BYTES, assistantStream = true)))
         }
         followJob = scope.launch {
-            // Watch only while the caller awaits the first baseline. Clearing must neither keep the
-            // jump spinning nor terminate the useful live follow that continues after that clear.
-            val invalidated = latestCompletion?.let { waiting ->
-                launch(start = CoroutineStart.UNDISPATCHED) {
-                    historyCache.ticketChanges.first { it != ticket }
-                    waiting.complete(false)
-                }
-            }
+            val invalidated = latestCompletion?.let { waiting -> launch(start = CoroutineStart.UNDISPATCHED) {
+                historyCache.ticketChanges.first { it != token.cacheTicket }
+                waiting.complete(false)
+            } }
             val completed = latestCompletion?.invokeOnCompletion { invalidated?.cancel() }
-            var readerAcknowledged = false
+            var acknowledged = false
             try {
-                runCatching {
-                    mux.openStream("session/readerFollow", args).collect { item ->
-                        when (val frame = decodeOrNull(SessionFollowFrameSerializer, item)) {
-                            is SessionFollowFrame.Snapshot -> {
-                                requireReaderCoverage(frame.reader, frame.records.firstOrNull()?.event?.seq?.toLong(),
-                                    frame.records.lastOrNull()?.event?.seq?.toLong(), frame.records.size.toLong(),
-                                    frame.cursor, hasMore = frame.hasMore)
-                                require(frame.records.zipWithNext().all { (a, b) -> b.event.seq == a.event.seq + 1 }) {
-                                    "Noncontiguous reader baseline"
-                                }
-                                readerAcknowledged = true
+                mux.openStream("session/readerFollow", args).collect { item ->
+                    when (val frame = decodeOrNull(SessionFollowFrameSerializer, item)) {
+                        is SessionFollowFrame.Snapshot -> {
+                            requireReaderCoverage(frame.reader, frame.records.firstOrNull()?.event?.seq?.toLong(),
+                                frame.records.lastOrNull()?.event?.seq?.toLong(), frame.records.size.toLong(),
+                                frame.cursor, hasMore = frame.hasMore)
+                            require(frame.records.zipWithNext().all { (a, b) -> b.event.seq == a.event.seq + 1 }) {
+                                "Noncontiguous reader baseline"
+                            }
+                            acknowledged = true
+                            if (isCurrent()) {
+                                val applied = historyReader.baseline(token, expandRecords(frame.records), frame.cursor,
+                                    frame.hasMore, bridgeReconnect = latestCompletion == null)
                                 synchronized(lock) {
-                                    if (!isCurrentFollow()) latestCompletion?.complete(false)
-                                    else if (latestCompletion?.isActive == true && requestedViewport == historyViewportRequest) {
-                                        val landed = historyCache.atTicket(ticket) {
-                                            historyAtTail = true
-                                            historyAnchorSeq = null
-                                            applyFollowSnapshotAtTicket(sessionId, frame, ticket)
-                                            !currentHasNewer && (currentEvents.lastOrNull()?.seq ?: -1L) >= frame.cursor
-                                        } ?: run {
-                                            applyFollowSnapshotAtTicket(sessionId, frame, ticket)
-                                            false
-                                        }
-                                        latestCompletion.complete(landed)
-                                    } else {
-                                        applyFollowSnapshotAtTicket(sessionId, frame, ticket)
-                                        latestCompletion?.complete(false)
-                                    }
+                                    if (applied && isCurrent()) {
+                                        applyFollowControlSnapshot(sessionId, frame)
+                                        latestCompletion?.complete(token.cacheTicket == historyCache.ticket())
+                                    } else latestCompletion?.complete(false)
                                 }
-                            }
-                            is SessionFollowFrame.Entry -> synchronized(lock) {
-                                check(readerAcknowledged) { "Reader stream did not acknowledge reader v1; upgrade the host" }
-                                if (isCurrentFollow()) applyFollowEntry(sessionId, frame.record)
-                            }
-                            is SessionFollowFrame.AssistantStream -> synchronized(lock) {
-                                check(readerAcknowledged) { "Reader stream did not acknowledge reader v1; upgrade the host" }
-                                if (isCurrentFollow()) applyAssistantFrame(sessionId, frame)
-                            }
-                            null -> error("Invalid lightweight reader frame; reader v1 is required")
+                            } else latestCompletion?.complete(false)
                         }
+                        is SessionFollowFrame.Entry -> {
+                            check(acknowledged) { "Reader stream did not acknowledge reader v1; upgrade the host" }
+                            if (isCurrent()) for (event in expandRecords(listOf(frame.record))) {
+                                synchronized(lock) { if (isCurrent()) handleSessionEvent(sessionId, event) }
+                                historyReader.append(token, event)
+                            }
+                        }
+                        is SessionFollowFrame.AssistantStream -> synchronized(lock) {
+                            check(acknowledged) { "Reader stream did not acknowledge reader v1; upgrade the host" }
+                            if (isCurrent()) applyAssistantFrame(sessionId, frame)
+                        }
+                        null -> error("Invalid lightweight reader frame; reader v1 is required")
                     }
-                }.onFailure { failure ->
-                    if (failure is kotlinx.coroutines.CancellationException) throw failure
-                    log("session/follow ended for $sessionId", failure)
-                    if (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException) {
-                        if (isCurrent()) setConnectionError(failure.message)
-                        connectionManager.reportStorageFailure(failure)
-                    }
-                    synchronized(lock) {
-                        if (shouldReportFollowFailure(failure, isCurrentFollow())) setConnectionError(
-                            if (readerAcknowledged) failure.message else
-                                "Lightweight reader unavailable: ${failure.message}. The host must support reader v1; upgrade it if needed. No raw fallback was loaded.")
-                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                log("session/readerFollow ended for $sessionId", failure)
+                if (isCurrent() && (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException))
+                    connectionManager.reportStorageFailure(failure)
+                synchronized(lock) {
+                    if (shouldReportFollowFailure(failure, isCurrent())) setConnectionError(if (acknowledged) failure.message else
+                        "Lightweight reader unavailable: ${failure.message}. The host must support reader v1; upgrade it if needed. No raw fallback was loaded.")
                 }
             } finally {
                 completed?.dispose()
@@ -2477,78 +1857,12 @@ class SessionStore @Inject constructor(
         }
     }
 
-    /** Compatibility entry for existing reflective tests; production carries the follow ticket. */
-    private fun applyFollowSnapshot(sessionId: String, frame: SessionFollowFrame.Snapshot) =
-        applyFollowSnapshotAtTicket(sessionId, frame, historyCacheTicket)
-
-    /** A cleared cache never receives old baseline writes, while the live stream remains usable. */
-    private fun applyFollowSnapshotAtTicket(sessionId: String, frame: SessionFollowFrame.Snapshot, ticket: Long) {
-        synchronized(lock) {
-            if (currentId != sessionId) return@synchronized
-            val host = historyHost ?: return@synchronized
-            latestObservedHistorySeq = frame.cursor.toLong()
-            if (knownFirstHistorySeq?.let { it > frame.cursor } == true || frame.cursor < 0) knownFirstHistorySeq = null
-            val incoming = expandRecords(frame.records)
-            observeHistoryBoundsLocked(incoming.firstOrNull()?.seq, null)
-            val cacheCurrent = historyCache.atTicket(ticket) {
-                check(historyCache.removeHistoryAfter(host, historyArchiveKey(sessionId), frame.cursor.toLong(), ticket))
-                check(historyCache.storeEvents(host, historyArchiveKey(sessionId), ticket, incoming))
-                // A fresh tail is exactly the server's small baseline, not the accumulated cache.
-                val page = HistoryDiskPage(incoming, frame.hasMore, false,
-                    legacyUnbounded = incoming.any { it.type == "assistant/chunk" },
-                    payloadBytes = incoming.sumOf { encodeHistoryEvent(it).payload.size.toLong() })
-                remoteOldestSeq = page.firstSeq
-                val visible = historyAnchorSeq?.takeIf { !historyAtTail }?.let {
-                    historyCache.historyAround(host, historyArchiveKey(sessionId), it, HISTORY_PAGE_SIZE * 2, ticket)
-                }?.takeIf { it.events.isNotEmpty() } ?: page
-                remoteHasOlder = frame.hasMore
-                installHistoryWindowLocked(visible)
-                true
-            } == true
-            if (!cacheCurrent) {
-                // Keep the reader's RAM viewport. A tiny live baseline may paint an empty screen,
-                // but cannot repopulate old disk content or claim that missing history is cached.
-                if (currentEvents.removeAll { it.seq > frame.cursor }) {
-                    currentWindowBytes = currentEvents.sumOf { encodeHistoryEvent(it).payload.size.toLong() }
-                    currentEventsRevision++
-                    currentLegacyWindow = currentEvents.any { it.type == "assistant/chunk" }
-                }
-                if (currentEvents.isEmpty()) {
-                    currentEvents.addAll(incoming)
-                    currentWindowBytes = incoming.sumOf { encodeHistoryEvent(it).payload.size.toLong() }
-                    currentLegacyWindow = currentEvents.any { it.type == "assistant/chunk" }
-                    currentEventsRevision++
-                }
-                currentOversizedWindow = currentWindowBytes > HistoryWindowBudget.payloadBytes(HistoryWindowBudget.TAIL_HIGH_MESSAGES)
-                currentHasNewer = (currentEvents.lastOrNull()?.seq ?: -1L) < frame.cursor.toLong()
-                currentHasMore = currentHasMore || frame.hasMore ||
-                    (frame.cursor >= 0 && (currentEvents.firstOrNull()?.seq ?: 1L) > 0)
-                remoteHasOlder = frame.hasMore
-                remoteOldestSeq = currentEvents.firstOrNull()?.seq
-            }
-            followCursor = frame.cursor
-            readerNextBeforeSeq = frame.reader?.nextBeforeSeq
-            _loadOlderFailed.value = false
-            val asOf = frame.projections["asOfSeq"]?.jsonPrimitive?.intOrNull ?: frame.cursor
-            (frame.projections["values"] as? JsonObject)?.forEach { (key, value) ->
-                mergeProjectionLocked(key, asOf, value)
-            }
-            liveAssistant.seed(frame.assistantStream, sparseReader = frame.reader?.version == 1)
-            rebuildCurrentLocked()
-            clearConnectionError()
-            historyViewportRequest++
-            _loadingOlder.value = false
-            _loadingNewer.value = false
-            _loadNewerFailed.value = false
-            if (cacheCurrent) saveHistoryLocked()
-        }
-    }
-
-    /** One live event. */
-    private fun applyFollowEntry(sessionId: String, record: SessionHistoryRecord) {
-        for (envelope in expandRecords(listOf(record))) {
-            handleSessionEvent(sessionId, envelope)
-        }
+    private fun applyFollowControlSnapshot(sessionId: String, frame: SessionFollowFrame.Snapshot) {
+        if (currentId != sessionId) return
+        val asOf = frame.projections["asOfSeq"]?.jsonPrimitive?.intOrNull ?: frame.cursor
+        (frame.projections["values"] as? JsonObject)?.forEach { (key, value) -> mergeProjectionLocked(key, asOf, value) }
+        liveAssistant.seed(frame.assistantStream, sparseReader = frame.reader?.version == 1)
+        rebuildCurrentLocked()
     }
 
     /** One process-local assistant frame: the reply being written, a chunk at a time. */
@@ -2576,104 +1890,8 @@ class SessionStore @Inject constructor(
             .onFailure { log("could not remember last session", it) }
     }
 
-    /**
-     * Page one screen further back.
-     *
-     * Called from the transcript's scroll position, so it has to be safe to call repeatedly: the
-     * in-flight flag collapses a burst of scroll emissions into one request, and a page that adds
-     * nothing new ends the paging rather than leaving `hasMore` set for the trigger to fire on
-     * again.
-     */
-    private data class OlderHistoryRead(
-        val host: String, val sid: String, val epoch: Long, val viewport: Long,
-        val oldest: Long, val cursor: Int?, val api: DshApiClient?, val ticket: Long,
-    )
-    private fun ownsOlderRead(read: OlderHistoryRead) = currentId == read.sid && historyHost == read.host &&
-        historyOpenEpoch == read.epoch && historyViewportRequest == read.viewport
-
-    suspend fun loadOlder() = withContext(Dispatchers.Default) {
-        val read = synchronized(lock) {
-            if (_loadingOlder.value || _loadingNewer.value) return@withContext
-            val sid = currentId ?: return@withContext
-            val host = historyHost ?: return@withContext
-            val oldest = currentEvents.firstOrNull()?.seq ?: return@withContext
-            _loadingOlder.value = true
-            OlderHistoryRead(host, sid, historyOpenEpoch, historyViewportRequest, oldest,
-                followCursor, connectionManager.connectedApi, historyCache.ticket())
-        }
-        try {
-            val fromDisk = synchronized(lock) {
-                if (!ownsOlderRead(read)) return@synchronized false
-                historyCache.atTicket(read.ticket) {
-                    val cached = historyCache.olderHistory(read.host, historyArchiveKey(read.sid), read.oldest, HISTORY_PAGE_SIZE, read.ticket)
-                    if (cached.events.isEmpty() || (cached.lastSeq ?: -1L) < read.oldest - 1) false
-                    else {
-                        val page = historyCache.historyAround(read.host, historyArchiveKey(read.sid), read.oldest - 1, HISTORY_PAGE_SIZE * 2, read.ticket)
-                        historyAtTail = false
-                        installHistoryWindowLocked(page)
-                        _loadOlderFailed.value = false
-                        rebuildCurrentLocked()
-                        true
-                    }
-                } ?: false
-            }
-            if (fromDisk) return@withContext
-            val api = read.api
-            val cursor = read.cursor
-            // No authoritative cut yet is waiting, not a failed user page.
-            if (cursor == null) return@withContext
-            if (api == null) {
-                synchronized(lock) { if (ownsOlderRead(read)) _loadOlderFailed.value = true }
-                return@withContext
-            }
-            val result = fetchStagedHistoryPage(api, historyCache, read.host, historyArchiveKey(read.sid), read.ticket,
-                readerRequest(SessionPageRequest(SessionAddress.Session(sessionId = read.sid), cursor,
-                    beforeSeq = readerNextBeforeSeq?.takeIf { it.toLong() == read.oldest } ?: read.oldest.toInt(),
-                    maxMessages = HISTORY_PAGE_SIZE))) { summary, commit ->
-                synchronized(lock) {
-                    ownsOlderRead(read) && api === connectionManager.connectedApi && followCursor == cursor &&
-                        (summary.metadata.recordCount == 0L || (summary.firstSeq ?: Long.MAX_VALUE) < read.oldest) &&
-                        commitHistoryPageLocked(summary, commit)
-                }
-            }
-            synchronized(lock) {
-                if (!ownsOlderRead(read) || api !== connectionManager.connectedApi || followCursor != cursor) return@synchronized
-                when (result) {
-                    is RpcResult.Err -> { _loadOlderFailed.value = true; setConnectionError(result.error.message) }
-                    is RpcResult.Ok -> {
-                        if (!result.value.committed) { _loadOlderFailed.value = true; return@synchronized }
-                        historyCache.atTicket(read.ticket) {
-                            val page = historyCache.historyAround(read.host, historyArchiveKey(read.sid), read.oldest - 1, HISTORY_PAGE_SIZE * 2, read.ticket)
-                            val progressed = result.value.metadata.recordCount == 0L ||
-                                (page.firstSeq ?: Long.MAX_VALUE) < read.oldest
-                            if (!progressed) { _loadOlderFailed.value = true; return@atTicket }
-                            readerNextBeforeSeq = result.value.metadata.reader?.nextBeforeSeq
-                            remoteHasOlder = result.value.metadata.hasMore
-                            remoteOldestSeq = page.firstSeq
-                            historyAtTail = false
-                            installHistoryWindowLocked(page)
-                            if (result.value.metadata.recordCount == 0L) currentHasMore = false
-                            _loadOlderFailed.value = false
-                            rebuildCurrentLocked()
-                        } ?: run { _loadOlderFailed.value = true }
-                    }
-                }
-            }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (failure: Exception) {
-            val report = synchronized(lock) {
-                if (!ownsOlderRead(read)) false else {
-                    _loadOlderFailed.value = true
-                    setConnectionError(failure.message)
-                    true
-                }
-            }
-            if (report && (failure is java.io.IOException || failure is android.database.sqlite.SQLiteException))
-                connectionManager.reportStorageFailure(failure)
-        } finally {
-            synchronized(lock) { if (ownsOlderRead(read)) _loadingOlder.value = false }
-        }
-    }
+    /** One explicit user load extends by a complete conversation turn. */
+    suspend fun loadOlder() = historyReader.loadOlder()
 
     suspend fun createSession(cwd: String? = null, workspaceId: String? = null) {
         // Reuse the workspace's existing blank session instead of leaving another empty one behind
@@ -3046,38 +2264,32 @@ class SessionStore @Inject constructor(
     }
 
     /**
-     * Full-text search across message content.
-     *
-     * This is the *optional* half of search, and most deployments do not have it: the shipped
-     * `session-query-sqlite` row is configured `openAt: never`, which keeps exact reads, titles and
-     * lineage traces working while `session.search` fails outright. So a failure here is a normal
-     * condition, not a fault — it is latched into [contentSearchAvailable], never raised as a
-     * connection error, and never retried for the life of the connection. The drawer's own title
-     * and workspace filtering is unaffected and remains the primary way to find a session, exactly
-     * as it is in the harness's web sidebar under the same configuration.
+     * Optional host-wide content search. Missing capability/trust refusal retires this surface for
+     * the connection; transient failures remain visible and allow a later explicit query. Local
+     * title/workspace filtering is unaffected. A newer query (including blank) retires both kinds
+     * of result from every older query, not just its hits.
      */
     suspend fun search(query: String) {
         val trimmed = query.trim()
-        // The host schema is query.trim().min(1).max(500); a blank or overlong query is an
-        // invalid payload, so never send one — a blank query just clears the result set.
-        if (trimmed.isEmpty()) {
-            _searchResults.value = emptyList()
-            return
-        }
-        if (!_contentSearchAvailable.value) return
-        val api = apiOrNull() ?: run {
-            // Disconnected: stale hits would otherwise sit under a query that never ran.
-            _searchResults.value = emptyList()
-            return
+        val (owner, ticket) = synchronized(lock) {
+            val ticket = searchQueryOrder.next()
+            if (trimmed.isEmpty() || !_contentSearchAvailable.value) {
+                _searchResults.value = emptyList()
+                return
+            }
+            val owner = readOwner() ?: run {
+                _searchResults.value = emptyList()
+                return
+            }
+            owner to ticket
         }
         val bounded = trimmed.take(SESSION_SEARCH_QUERY_MAX_CHARS)
-        when (val r = api.sessionSearch(bounded)) {
-            is RpcResult.Ok -> _searchResults.value = r.value.items.map { it.sessionId to it.snippet }
-            is RpcResult.Err -> {
-                _contentSearchAvailable.value = false
+        readOwned(owner, isLatest = { searchQueryOrder.isLatest(ticket) }, call = { it.sessionSearch(bounded) },
+            success = { _searchResults.value = it.items.map { item -> item.sessionId to item.snippet } },
+            failure = {
                 _searchResults.value = emptyList()
-            }
-        }
+                optionalReadFailure("session/search", it) { _contentSearchAvailable.value = false }
+            })
     }
 
     suspend fun fetchAttachment(attachmentId: String, sessionId: String? = currentSessionId.value, host: String? = activeHostKey): ByteArray? {
@@ -3107,22 +2319,19 @@ class SessionStore @Inject constructor(
      */
     suspend fun refreshSubagents() {
         val sid = currentSessionId.value ?: return
-        val hasCatalog = synchronized(lock) {
-            currentId == sid && currentProjections.containsKey(SUBAGENT_CATALOG_PROJECTION)
-        }
-        if (hasCatalog) {
-            synchronized(lock) { publishCatalogSubagentsLocked() }
-            return
-        }
-        val api = apiOrNull() ?: return
-        when (val r = api.subagentList(sid)) {
-            is RpcResult.Ok -> synchronized(lock) {
-                if (currentId == sid && !currentProjections.containsKey(SUBAGENT_CATALOG_PROJECTION)) {
-                    _subagents.value = r.value.entries
-                }
+        val owner = synchronized(lock) {
+            if (currentId != sid) return
+            if (currentProjections.containsKey(SUBAGENT_CATALOG_PROJECTION)) {
+                publishCatalogSubagentsLocked()
+                return
             }
-            is RpcResult.Err -> if (r.error.code != CAPABILITY_UNAVAILABLE) setConnectionError(r.error.message)
+            readOwner(sid) ?: return
         }
+        readOwned(owner, call = { it.subagentList(sid) },
+            // A projection arriving during the legacy read remains authoritative for both outcomes.
+            isLatest = { !currentProjections.containsKey(SUBAGENT_CATALOG_PROJECTION) },
+            success = { _subagents.value = it.entries },
+            failure = { optionalReadFailure("subagents/list", it) {} })
     }
 
     suspend fun interruptSubagent(childSessionId: String) {
@@ -3297,20 +2506,16 @@ class SessionStore @Inject constructor(
      */
     suspend fun refreshCommands() {
         val sid = currentSessionId.value ?: return
-        val api = apiOrNull() ?: return
-        when (val r = api.commandsList(sid)) {
-            is RpcResult.Ok -> synchronized(lock) {
-                if (currentId == sid) {
-                    _commands.value = r.value
-                    _commandsAvailable.value = true
-                }
-            }
-            is RpcResult.Err -> {
+        val owner = readOwner(sid) ?: return
+        readOwned(owner, call = { it.commandsList(sid) }, success = {
+            _commands.value = it
+            _commandsAvailable.value = true
+        }, failure = {
+            optionalReadFailure("commands/list", it) {
                 _commandsAvailable.value = false
                 _commands.value = emptyList()
-                log("commands/list unavailable (${r.error.code}): ${r.error.message}")
             }
-        }
+        })
     }
 
     /**
@@ -3397,23 +2602,16 @@ class SessionStore @Inject constructor(
      * failure to report.
      */
     suspend fun refreshPlugins() {
-        val api = apiOrNull() ?: return
-        when (val r = api.pluginInventoryList()) {
-            is RpcResult.Ok -> _plugins.value = r.value
-            is RpcResult.Err -> {
-                _plugins.value = null
-                log("pluginInventory/list unavailable (${r.error.code}): ${r.error.message}")
-            }
-        }
+        val owner = readOwner() ?: return
+        readOwned(owner, call = { it.pluginInventoryList() }, success = { _plugins.value = it },
+            failure = { optionalReadFailure("pluginInventory/list", it) { _plugins.value = null } })
     }
 
     /** Reload the agent-preset roster (host-scoped, so it survives session switches). */
     suspend fun refreshAgentPresets() {
-        val api = apiOrNull() ?: return
-        when (val r = api.agentPresetList()) {
-            is RpcResult.Ok -> _agentPresets.value = r.value
-            is RpcResult.Err -> log("agentPreset.list unavailable (${r.error.code}): ${r.error.message}")
-        }
+        val owner = readOwner() ?: return
+        readOwned(owner, call = { it.agentPresetList() }, success = { _agentPresets.value = it },
+            failure = { optionalReadFailure("agentPresets/list", it) { _agentPresets.value = null } })
     }
 
     /**
@@ -3486,83 +2684,55 @@ class SessionStore @Inject constructor(
     }
 
     private suspend fun loadSkills(sessionId: String) {
-        val api = apiOrNull() ?: return
-        when (val r = api.skillList(SkillListRequest(sessionId))) {
-            is RpcResult.Ok -> synchronized(lock) {
-                if (currentId == sessionId) _skills.value = r.value.skills
-            }
-            is RpcResult.Err -> setConnectionError(r.error.message)
-        }
+        val owner = readOwner(sessionId) ?: return
+        readOwned(owner, call = { it.skillList(SkillListRequest(sessionId)) }, success = { _skills.value = it.skills })
     }
 
     private suspend fun loadModels(sessionId: String) {
-        val api = apiOrNull() ?: return
-        // Host-scoped now, not session-scoped: `session/modelCatalog` describes the generation's
-        // routable models, and the session's own current selection comes from its projections.
-        when (val r = api.sessionModelCatalog()) {
-            is RpcResult.Ok -> synchronized(lock) {
-                if (currentId == sessionId) _models.value = r.value
+        val owner = readOwner(sessionId) ?: return
+        // The wire catalog is host-scoped, but this picker read belongs to the selection that
+        // requested it. The session's current model still comes exclusively from its projection.
+        readOwned(owner, call = { it.sessionModelCatalog() }, success = { _models.value = it })
+    }
+
+    /** Capture under the same lock used to switch selections and publish read results. */
+    private fun readOwner(sessionId: String? = null): ReadResultOwner? = synchronized(lock) {
+        val host = activeHostKey ?: return@synchronized null
+        val api = apiForHost(host) ?: return@synchronized null
+        val selection = sessionId?.let {
+            if (currentId != it || historyHost != host) return@synchronized null
+            ReadSelection(it, sessionSelectionEpoch)
+        }
+        ReadResultOwner(host, api, selection)
+    }
+
+    /** Read-only contract: never use this to discard, reinterpret, or retry a command outcome. */
+    private suspend fun <T> readOwned(
+        owner: ReadResultOwner,
+        isLatest: () -> Boolean = { true },
+        call: suspend (DshApiClient) -> RpcResult<T>,
+        success: (T) -> Unit,
+        failure: (RpcError) -> Unit = { setConnectionError(it.message) },
+    ) {
+        val result = call(owner.api)
+        synchronized(lock) {
+            if (!isLatest()) return
+            owner.applyIfCurrent(readOwner(owner.selection?.sessionId), result) { current ->
+                when (current) {
+                    is RpcResult.Ok -> success(current.value)
+                    is RpcResult.Err -> failure(current.error)
+                }
             }
-            is RpcResult.Err -> setConnectionError(r.error.message)
         }
     }
 
-    /**
-     * The tail slice of a history page the host over-delivered.
-     *
-     * `maxMessages` is a bound on *messages*, and not every harness build honours it — one was
-     * observed answering a 60-message request with ~29k events (several MB), which folds slowly
-     * enough to stall the first paint. Trimming is not as simple as keeping the last N events
-     * though: a single assistant message can be hundreds of `assistant/chunk` deltas, so a fixed
-     * event count yields a page with almost nothing readable in it. This walks back until it has
-     * [HISTORY_PAGE_SIZE] actual messages, with a hard event ceiling so a pathological log still
-     * cannot stall the fold. Anything trimmed is reported as `hasMore`, which is what
-     * "Load older" is for.
-     */
-    /**
-     * Whether one envelope is a genuine user prompt rather than harness-injected context.
-     *
-     * The harness tags a real prompt with `source.kind` of `user`; everything else
-     * (`agent-instructions`, `skill-invocation`, `goal`, …) is context. Deliberately stricter than
-     * `UserMessageNode.isInjectedContext`: this decides where the transcript *starts*, and an
-     * untagged message must not be mistaken for the reader's own last turn — so unlike the node
-     * predicate, an absent tag is a "no" here rather than a "yes".
-     *
-     * `user-rpc` is not a `source.kind` value — it is a key in the harness's `MessageSourceMap`
-     * whose variant carries `kind: 'user'` itself, so `"user"` covers both paths.
-     */
-    private fun isRealUserPrompt(e: SessionEventEnvelope): Boolean =
-        e.type == "user/message" &&
-            ((e.data as? JsonObject)?.get("source") as? JsonObject)
-                ?.get("kind")?.jsonPrimitive?.contentOrNull == "user"
-
-    /**
-     * Drop everything strictly before the oldest real user prompt in [envelopes].
-     *
-     * The harness opens a window of a fixed number of *events*, and a tool-heavy turn is mostly
-     * events — so a session opened cold used to start mid-tool-call-loop, with the message that
-     * prompted the work somewhere above the fold. Anchoring on the reader's last prompt instead
-     * makes the first screen read as a conversation. No prompt in the window means no anchor, and
-     * the list is returned unchanged rather than emptied.
-     */
-    private fun trimToUserPrompt(envelopes: List<SessionEventEnvelope>): List<SessionEventEnvelope> {
-        val sorted = envelopes.sortedBy { it.seq }
-        val index = sorted.indexOfFirst { isRealUserPrompt(it) }
-        return if (index < 0) sorted else sorted.subList(index, sorted.size)
-    }
-
-    private fun historyTail(entries: List<SessionEventEnvelope>): List<SessionEventEnvelope> {
-        if (entries.size <= MAX_PAGE_EVENTS) return entries
-        var messages = 0
-        var index = entries.lastIndex
-        while (index > 0 && entries.size - index < MAX_PAGE_EVENTS) {
-            if (entries[index].type in SURFACE_EVENT_TYPES) {
-                messages++
-                if (messages >= HISTORY_PAGE_SIZE) break
-            }
-            index--
+    private fun optionalReadFailure(endpoint: String, error: RpcError, unavailable: () -> Unit) {
+        if (error.isOptionalReadUnavailable()) {
+            unavailable()
+            log("$endpoint unavailable (${error.code}): ${error.message}")
+        } else {
+            setConnectionError(error.message)
         }
-        return entries.subList(index.coerceAtLeast(0), entries.size)
     }
 
     private fun subagentEntryId(entry: SubagentListEntry): String? = when (entry) {
@@ -3584,17 +2754,13 @@ class SessionStore @Inject constructor(
     val commandAttachmentsSupported: Boolean get() = connectionManager.connectedApi != null
 
     suspend fun refreshPermissionCatalog() {
-        val epoch = ++permissionCatalogEpoch
-        val key = activeHostKey
-        val api = apiForHost(key) ?: return
-        // Not cleared before the read. Blanking first made the permission chip lose its options for
-        // the length of a round trip on every baseline, which reads as the chip breaking rather
-        // than as a refresh. The epoch and host guards below already stop a slow answer from
-        // overwriting a newer host's catalog, which is what the clear was standing in for.
-        val result = api.permissionCatalog()
-        if (epoch == permissionCatalogEpoch && key == activeHostKey) {
-            permissionCatalog.value = (result as? RpcResult.Ok)?.value
+        val (owner, ticket) = synchronized(lock) {
+            (readOwner() ?: return) to permissionCatalogOrder.next()
         }
+        // Keep the last valid options while refreshing, including on transient failures.
+        readOwned(owner, isLatest = { permissionCatalogOrder.isLatest(ticket) },
+            call = { it.permissionCatalog() }, success = { permissionCatalog.value = it },
+            failure = { optionalReadFailure("permission-presets/catalog", it) { permissionCatalog.value = null } })
     }
 
     suspend fun unarchiveSession(sessionId: String): Boolean {
@@ -3641,13 +2807,6 @@ class SessionStore @Inject constructor(
 
         /** Largest file the base64 Remote fallback will carry; anything bigger needs the route. */
         const val MAX_ENCODED_UPLOAD_BYTES = 20L * 1024 * 1024
-        const val HISTORY_PAGE_SIZE = 60
-
-        /** Ceiling on events folded per page, whatever the host sends. */
-        const val MAX_PAGE_EVENTS = 4_000
-
-        /** The event types that produce a visible message; everything else frames them. */
-        val SURFACE_EVENT_TYPES = setOf("user/message", "assistant/message", "tool/result")
 
         /** Host-side wire bound for `session.search` (SESSION_SEARCH_QUERY_MAX_CHARS). */
         const val SESSION_SEARCH_QUERY_MAX_CHARS = 500

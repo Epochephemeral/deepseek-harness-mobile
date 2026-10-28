@@ -32,6 +32,8 @@ class MinimalReaderTest {
 
     @Test fun `paging only responds once per drag toward earlier edge`() {
         val gate = ReaderPagingGesture()
+        assertFalse(gate.request(4f, true, true)) // semantics ScrollBy without a pointer
+        gate.beginGesture()
         assertFalse(gate.request(0f, true, true)) // layout alone
         assertFalse(gate.request(-4f, true, true)) // toward latest
         assertFalse(gate.request(4f, false, true)) // not at earlier edge
@@ -39,6 +41,8 @@ class MinimalReaderTest {
         assertTrue(gate.request(4f, true, true))
         assertFalse(gate.request(4f, true, true)) // page arriving under stationary finger
         gate.endGesture()
+        assertFalse(gate.request(4f, true, true)) // release/cancel disarms semantics and fling emissions
+        gate.beginGesture()
         assertTrue(gate.request(4f, true, true))
     }
 }

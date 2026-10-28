@@ -1,0 +1,115 @@
+name: Reader host contract (opt-in Desktop artifact)
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_ref:
+        description: Immutable 40-hex Desktop commit with reader packaging enabled
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      desktop_ref:
+        required: true
+        type: string
+    secrets:
+      DESKTOP_READ_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  reader-host-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require immutable Desktop identity
+        env:
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+        run: '[[ "$DESKTOP_REF" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "desktop_ref must be a full 40-hex commit SHA" >&2; exit 1; }'
+      - uses: actions/checkout@v4
+        with:
+          repository: Epochephemeral/dsh-desktop
+          ref: ${{ inputs.desktop_ref }}
+          path: build/reader-desktop
+          token: ${{ secrets.DESKTOP_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify Desktop owns an integrated reader artifact
+        working-directory: build/reader-desktop
+        env:
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${DESKTOP_REF,,}"
+          node --input-type=module <<'NODE'
+          import { readFileSync, existsSync } from 'node:fs'
+          const fail = message => { throw new Error(`Reader artifact unavailable: ${message}. No official-host fallback is permitted.`) }
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
+          if (!/^yarn@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(pkg.packageManager ?? '')) fail('Desktop must declare an exact Yarn toolchain version')
+          const provenance = JSON.parse(readFileSync('runtime-customizations/session-reader/provenance.json', 'utf8'))
+          const selectors = [`@deepseek-ai/dsh-api-session-controller@npm:${provenance.packageVersion}`,
+            `@deepseek-ai/dsh-api-session-controller@npm:^${provenance.packageVersion}`]
+          for (const selector of selectors) {
+            if (!pkg.resolutions?.[selector]?.startsWith('patch:')) fail(`${selector} does not enable the Desktop reader patch; choose a packaging-enabled commit`)
+          }
+          const tar = `vendor/dsh-runtime/${provenance.packageVersion}/deepseek-ai-dsh-api-session-controller-${provenance.packageVersion}.tgz`
+          if (!existsSync(tar)) fail('Desktop vendored runtime is absent; prepare/publish it in Desktop first, not by rebuilding a different host here')
+          NODE
+      - name: Install Desktop dependency graph without changing its lockfile
+        working-directory: build/reader-desktop
+        run: |
+          corepack enable
+          corepack yarn install --immutable
+          node --test scripts/session-reader-patch.test.mjs
+      - name: Resolve and verify the actual installed CLI entry
+        working-directory: build/reader-desktop
+        run: |
+          node --input-type=module <<'NODE'
+          import { createRequire } from 'node:module'
+          import { readFileSync, existsSync, appendFileSync, realpathSync } from 'node:fs'
+          import { resolve, dirname } from 'node:path'
+          const resolver = resolve('dsh-plugin-desktop/package.json')
+          const require = createRequire(resolver)
+          const manifest = require.resolve('@deepseek-ai/dsh/package.json')
+          const pkg = JSON.parse(readFileSync(manifest, 'utf8'))
+          const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh
+          if (!bin) throw new Error('Installed dsh package declares no CLI bin')
+          const cli = realpathSync(resolve(dirname(manifest), bin))
+          if (!existsSync(cli)) throw new Error('Declared CLI artifact missing')
+          appendFileSync(process.env.GITHUB_ENV, `DSH_HARNESS_CLI=${cli}\nDSH_HARNESS_RUNTIME_ROOT=${process.cwd()}\nDSH_READER_RESOLVER=${resolver}\nDSH_READER_CONFORMANCE=true\n`)
+          console.log(`Verified installed CLI ${cli}; version ${pkg.version}`)
+          NODE
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Real HTTP and mux reader-v1 contract, without a model
+        run: ./gradlew :conformance:test --tests '*ReaderHostConformanceTest' --rerun-tasks --stacktrace
+      - name: Require executed contract (never accept a skipped suite)
+        run: |
+          python3 - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          files = list(pathlib.Path('conformance/build/test-results/test').glob('TEST-*ReaderHostConformanceTest.xml'))
+          assert len(files) == 1, 'Reader conformance report missing'
+          root = ET.parse(files[0]).getroot()
+          assert int(root.attrib['tests']) > 0 and int(root.attrib.get('skipped', 0)) == 0, 'Reader suite did not execute'
+          assert int(root.attrib.get('failures', 0)) == 0 and int(root.attrib.get('errors', 0)) == 0
+          PY
+      - name: Upload reader host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reader-host-contract-${{ inputs.desktop_ref }}
+          path: |
+            conformance/build/reports/tests/test
+            conformance/build/test-results/test
+            conformance/build/conformance-logs
+            build/reader-desktop/runtime-customizations/session-reader/provenance.json

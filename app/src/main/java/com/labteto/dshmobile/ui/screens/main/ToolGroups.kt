@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -28,7 +29,11 @@ import com.labteto.dshmobile.R
 internal sealed interface TranscriptRow {
     val seq: Long
     data class Message(val node: ChatNode) : TranscriptRow { override val seq get() = node.seq }
-    data class Tools(val calls: List<ToolCallNode>) : TranscriptRow { override val seq get() = calls.first().seq }
+    data class Tools(
+        val calls: List<ToolCallNode>,
+        // Keep a surviving group's first identity when older/newer members extend the run.
+        val identitySeq: Long = calls.first().seq,
+    ) : TranscriptRow { override val seq get() = calls.first().seq }
     data class Context(val nodes: List<ChatNode>) : TranscriptRow { override val seq get() = nodes.first().seq }
 
     /**
@@ -153,10 +158,65 @@ private fun foldTurnProcess(
     return rows.take(firstWork) + process + rows.drop(until)
 }
 
+/** Desktop's inner process disclosure: any semantic run, never a fixed-size tool batch.
+ * Running and failed tools update the summary without overriding the reader's open/closed choice.
+ */
 @Composable
-internal fun ToolGroupRow(calls: List<ToolCallNode>, context: ChatNodeContext) {
-    Column(Modifier.fillMaxWidth()) {
-        calls.forEach { call -> key(call.callId) { ToolCallRow(call, context, compact = true) } }
+internal fun ToolGroupRow(
+    calls: List<ToolCallNode>,
+    context: ChatNodeContext,
+    identitySeq: Long = calls.first().seq,
+    expandedState: MutableState<Boolean>? = null,
+    renderDetails: Boolean = true,
+    onExpansionChange: ((Boolean) -> Unit)? = null,
+) {
+    val localExpanded = rememberSaveable(identitySeq) { mutableStateOf(false) }
+    var expanded by (expandedState ?: localExpanded)
+    val results = remember(context.nodes) { context.nodes.filterIsInstance<ToolResultNode>().associateBy { it.callId } }
+    val failed = calls.count { results[it.callId]?.isError == true }
+    val active = calls.lastOrNull { it.callId !in results }?.takeIf { context.running && !context.hasNewer }
+    val disclosureState = stringResource(if (expanded) R.string.ux_b_expanded else R.string.ux_b_collapsed)
+    val colors = DsTheme.colors
+    Column(Modifier.fillMaxWidth().clip(DsShapes.block).background(colors.bgLayer1)
+        .border(1.dp, colors.borderL2, DsShapes.block)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .semantics { stateDescription = disclosureState }
+            .clickable(role = Role.Button) {
+                val next = !expanded
+                if (onExpansionChange != null) onExpansionChange(next) else expanded = next
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(FeatherIcons.Activity, null, Modifier.size(16.dp), tint = colors.labelTertiary)
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.chat_tool_group_count, calls.size),
+                    style = DsType.small13, color = colors.labelSecondary)
+                if (active != null) Text(
+                    stringResource(R.string.reader_tool_running) + " · " +
+                        (active.description?.takeIf { it.isNotBlank() } ?: active.name),
+                    style = DsType.caption11, color = colors.labelTertiary, maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            if (failed > 0) Text(stringResource(R.string.chat_tool_group_failed, failed),
+                style = DsType.caption11, color = colors.error)
+            Icon(FeatherIcons.ChevronRight, null, Modifier.size(16.dp)
+                .graphicsLayer { rotationZ = if (expanded) 90f else 0f }, tint = colors.labelCaption)
+        }
+        if (expanded && renderDetails) Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            // Deliberately use the transcript's scroll surface on a phone, not a nested gesture trap.
+            calls.forEach { call -> key(call.callId) { ToolCallRow(call, context, compact = true) } }
+        }
+    }
+}
+
+/** One lazy child on Chat's existing scroll surface, never a nested scrolling tool list. */
+@Composable
+internal fun ToolGroupDetailRow(call: ToolCallNode, context: ChatNodeContext) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)
+        .clip(DsShapes.block).background(DsTheme.colors.bgLayer1)
+        .padding(horizontal = 10.dp, vertical = 4.dp)) {
+        ToolCallRow(call, context, compact = true)
     }
 }
 

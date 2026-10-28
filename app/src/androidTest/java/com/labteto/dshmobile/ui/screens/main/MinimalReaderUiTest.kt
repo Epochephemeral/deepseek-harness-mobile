@@ -81,6 +81,57 @@ class MinimalReaderUiTest {
         compose.runOnIdle { assertEquals(1, requests) }
     }
 
+    @Test fun olderLoadingKeepsItsHeightAndDisablesRetryUntilTheReadFinishes() {
+        var loading by mutableStateOf(false)
+        var failed by mutableStateOf(false)
+        var requests = 0
+        compose.setContent { DshTheme {
+            Column {
+                LoadOlderRow(loading, failed, offerManual = true, onRetry = { requests++; loading = true })
+                androidx.compose.material3.Text("Reading anchor")
+            }
+        } }
+        compose.waitForIdle()
+        val before = compose.onNodeWithText("Reading anchor").getBoundsInRoot()
+        compose.onNodeWithText(label(R.string.chat_load_older)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(label(R.string.chat_loading_older)).assertIsDisplayed()
+        assertEquals(before, compose.onNodeWithText("Reading anchor").getBoundsInRoot())
+        compose.runOnIdle { loading = false; failed = true }
+        compose.waitForIdle()
+        compose.onNodeWithText(label(R.string.chat_load_older_retry)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(label(R.string.chat_loading_older)).assertIsDisplayed()
+        compose.onNodeWithText(label(R.string.chat_load_older_retry)).assertDoesNotExist()
+        assertEquals(before, compose.onNodeWithText("Reading anchor").getBoundsInRoot())
+        compose.runOnIdle { assertEquals(2, requests) }
+    }
+
+    @Test fun newerLoadingKeepsItsHeightAcrossActionLoadingAndRetry() {
+        var loading by mutableStateOf(false)
+        var failed by mutableStateOf(false)
+        var requests = 0
+        compose.setContent { DshTheme {
+            Column {
+                LoadNewerRow(loading, failed, onRetry = { requests++; loading = true })
+                androidx.compose.material3.Text("Reading anchor")
+            }
+        } }
+        compose.waitForIdle()
+        val before = compose.onNodeWithText("Reading anchor").getBoundsInRoot()
+        compose.onNodeWithText(label(R.string.chat_load_newer)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(label(R.string.chat_loading_newer)).assertIsDisplayed()
+        assertEquals(before, compose.onNodeWithText("Reading anchor").getBoundsInRoot())
+        compose.runOnIdle { loading = false; failed = true }
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Reading anchor").getBoundsInRoot())
+        compose.onNodeWithText(label(R.string.common_retry)).performClick()
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Reading anchor").getBoundsInRoot())
+        compose.runOnIdle { assertEquals(2, requests) }
+    }
+
     @Test fun imageLoaderIsNotComposedBeforeExplicitPreviewTap() {
         var loads = 0
         compose.setContent { DshTheme {

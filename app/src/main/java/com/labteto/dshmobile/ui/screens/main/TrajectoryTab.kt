@@ -30,6 +30,10 @@ import com.labteto.dshmobile.R
 import com.labteto.dshmobile.core.session.AssistantMessageNode
 import com.labteto.dshmobile.core.session.ChatNode
 import com.labteto.dshmobile.core.session.ConversationSnapshot
+import com.labteto.dshmobile.core.session.SessionEventEnvelope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.labteto.dshmobile.core.session.ToolCallNode
 import com.labteto.dshmobile.core.session.ToolResultNode
 import com.labteto.dshmobile.core.session.UserMessageNode
@@ -71,6 +75,8 @@ internal fun TrajectoryTab(
     historyInteractionEnabled: Boolean = true,
     viewportRestore: HistoryViewportRestoreRequest? = null,
     onViewportRestored: (Long) -> Unit = {},
+    /** Main reader loads diagnostic payloads only while Raw is expanded; legacy panes use journal. */
+    loadJournal: (suspend () -> List<SessionEventEnvelope>)? = null,
 ) {
     val colors = DsTheme.colors
     val nodes = conversation?.nodes.orEmpty()
@@ -84,8 +90,28 @@ internal fun TrajectoryTab(
     }
 
     val hasNewer = conversation?.hasNewer == true
-    val firstSeq = conversation?.journal?.firstOrNull()?.seq ?: nodes.firstOrNull()?.seq
-    val lastSeq = conversation?.journal?.lastOrNull()?.seq ?: nodes.lastOrNull()?.seq
+    val firstSeq = conversation?.loadedFromSeq ?: conversation?.journal?.firstOrNull()?.seq ?: nodes.firstOrNull()?.seq
+    val lastSeq = conversation?.loadedThroughSeq ?: conversation?.journal?.lastOrNull()?.seq ?: nodes.lastOrNull()?.seq
+    var rawEvents by remember(conversation?.sessionId) { mutableStateOf<List<SessionEventEnvelope>?>(null) }
+    var rawLoading by remember(conversation?.sessionId) { mutableStateOf(false) }
+    var rawError by remember(conversation?.sessionId) { mutableStateOf<String?>(null) }
+    var rawRetry by remember(conversation?.sessionId) { mutableStateOf(0) }
+    val journalLoader by rememberUpdatedState(loadJournal)
+    val rawAvailable = !conversation?.journal.isNullOrEmpty() || (loadJournal != null && firstSeq != null)
+    val journal = if (loadJournal == null) conversation?.journal.orEmpty() else rawEvents.orEmpty()
+    LaunchedEffect(conversation?.sessionId, rawOpen, firstSeq, lastSeq, rawRetry) {
+        if (!rawOpen) { rawEvents = null; rawError = null; rawLoading = false; return@LaunchedEffect }
+        val load = journalLoader ?: return@LaunchedEffect
+        rawLoading = true
+        rawError = null
+        try {
+            val records = load()
+            currentCoroutineContext().ensureActive()
+            rawEvents = records
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { rawError = failure.message ?: failure.javaClass.simpleName }
+        finally { rawLoading = false }
+    }
     val reportViewport by rememberUpdatedState(onHistoryViewport)
     LaunchedEffect(listState, conversation?.sessionId, hasNewer, firstSeq, lastSeq, historyInteractionEnabled) {
         if (!historyInteractionEnabled) return@LaunchedEffect
@@ -114,12 +140,13 @@ internal fun TrajectoryTab(
         }
     }
 
-    LaunchedEffect(viewportRestore, groups, hasNewer, conversation?.hasMore, firstSeq, lastSeq, rawOpen) {
+    LaunchedEffect(viewportRestore, groups, hasNewer, conversation?.hasMore, firstSeq, lastSeq, rawOpen, rawEvents, rawLoading) {
         val request = viewportRestore ?: return@LaunchedEffect
         if ((request.position.rawExpanded || ((request.position.key as? String)?.startsWith("raw-") == true && request.position.key != "raw-header")) && !rawOpen) {
             rawOpen = true
             return@LaunchedEffect
         }
+        if (rawOpen && loadJournal != null && (rawLoading || rawEvents == null)) return@LaunchedEffect
         val keys: List<Any> = buildList {
             if (conversation?.hasMore == true) add("load-older")
             if (groups.isEmpty()) add("empty")
@@ -129,9 +156,12 @@ internal fun TrajectoryTab(
             }
             if (hasNewer) add("load-newer")
             if (stats != null || usage != null) add("totals")
-            if (!conversation?.journal.isNullOrEmpty()) {
+            if (rawAvailable) {
                 add("raw-header")
-                if (rawOpen) addAll(conversation!!.journal.map { "raw-${it.seq}" })
+                if (rawOpen) {
+                    if (rawLoading || rawError != null) add("raw-status")
+                    addAll(journal.map { "raw-${it.seq}" })
+                }
             }
         }
         if (!historyRestoreWindowReady(conversation, keys, request)) return@LaunchedEffect
@@ -156,16 +186,11 @@ internal fun TrajectoryTab(
                         canPageEarlier)) requestEarlier()
                 return androidx.compose.ui.geometry.Offset.Zero
             }
-            override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity,
-                available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
-                gestureGate.endGesture()
-                return androidx.compose.ui.unit.Velocity.Zero
-            }
         }
     }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxWidth().nestedScroll(userScroll),
+        modifier = modifier.fillMaxWidth().readerPagingGestures(gestureGate).nestedScroll(userScroll),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -218,19 +243,33 @@ internal fun TrajectoryTab(
         // Every event as the host logged it, for the rare reader who needs the wire. Collapsed by
         // default and after the totals: open, it is hundreds of rows, and with no heading the
         // ledger above seemed to turn into a debug dump halfway down.
-        val journal = conversation?.journal.orEmpty()
-        if (journal.isNotEmpty()) {
+        if (rawAvailable) {
             item(key = "raw-header") {
                 com.labteto.dshmobile.ui.components.DisclosureRow(
                     title = stringResource(R.string.trajectory_tab_raw),
-                    summary = journal.size.toString(),
+                    summary = if (rawOpen || loadJournal == null) journal.size.toString() else "",
                     icon = com.labteto.dshmobile.ui.components.FeatherIcons.List,
                     expanded = rawOpen,
-                    onToggle = { rawOpen = !rawOpen },
+                    onToggle = {
+                        rawOpen = !rawOpen
+                        if (!rawOpen) { rawEvents = null; rawError = null }
+                    },
                     modifier = Modifier.padding(top = 12.dp),
                 )
             }
             if (rawOpen) {
+                if (rawLoading || rawError != null || (loadJournal != null && rawEvents == null)) {
+                    item(key = "raw-status") {
+                        if (rawError == null) Text(stringResource(R.string.common_loading), style = DsType.caption11)
+                        else Column {
+                            Text(stringResource(R.string.err_generic, rawError.orEmpty()), style = DsType.caption11, color = colors.error)
+                            com.labteto.dshmobile.ui.components.DsButton(
+                                text = stringResource(R.string.common_retry), onClick = { rawRetry++ },
+                                variant = com.labteto.dshmobile.ui.components.DsButtonVariant.Ghost,
+                                size = com.labteto.dshmobile.ui.components.DsButtonSize.Small)
+                        }
+                    }
+                }
                 journal.forEach { event ->
                     item(key = "raw-${event.seq}") {
                         JsonDisclosure("#${event.seq} · ${event.type} · ${java.text.DateFormat.getTimeInstance().format(java.util.Date(event.time))}",

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.labteto.dshmobile.R
 import com.labteto.dshmobile.core.session.*
+import com.labteto.dshmobile.data.HistoryViewportBookmark
 import com.labteto.dshmobile.ui.theme.DshTheme
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -26,42 +27,46 @@ class HistoryReadingRestoreTest {
             UserMessageNode(it, "u$it", listOf(ChatBlock("text", "row $it")), "user")
         }, hasNewer = true)
 
-    private data class Saved(val view: ChatTab, val window: ConversationSnapshot, val position: HistoryReadingPosition)
     private class Harness(initial: ConversationSnapshot) {
         var snapshot by mutableStateOf(initial)
         var tab by mutableStateOf(ChatTab.Chat)
-        var sheet by mutableStateOf(false)
+        val sheet get() = reader.sheetOpen
         var loadingNewer by mutableStateOf(true)
         var newerRequests = 0
         var draft = ""
         var editPosition: HistoryReadingPosition? = null
-        val reader = HistoryReadingState()
-        val saved = mutableMapOf<ChatTab, Saved>()
-        var sheetSaved: Saved? = null
+        lateinit var reader: HistoryReadingState
         lateinit var chat: LazyListState
         lateinit var ledger: LazyListState
-
+        private var anchorSeq: Long? = null
+        private var following = false
+        private val availableNodes = mutableMapOf<Long, ChatNode>()
+        val access = object : HistoryReadingAccess {
+            override val conversation get() = snapshot
+            override fun updateViewport(anchorSeq: Long?, atTail: Boolean) {
+                this@Harness.anchorSeq = anchorSeq
+                following = atTail
+            }
+            override fun captureViewport(): HistoryViewportBookmark {
+                snapshot.nodes.forEach { availableNodes[it.seq] = it }
+                return HistoryViewportBookmark(following, anchorSeq, "host", "reading", 1)
+            }
+            override suspend fun restoreViewport(bookmark: HistoryViewportBookmark): Boolean {
+                snapshot.nodes.forEach { availableNodes[it.seq] = it }
+                if (bookmark.anchorSeq != null && bookmark.anchorSeq !in availableNodes) return false
+                // The data fake retains nodes independently; bookmarks contain only reading intent.
+                snapshot = snapshot.copy(nodes = availableNodes.values.sortedBy { it.seq })
+                return true
+            }
+            override suspend fun seekTurn(startSeq: Long) = true
+        }
+        fun pane() = HistoryPaneSnapshot(snapshot, null, null, null, true)
         fun position(view: ChatTab = tab) = captureHistoryReadingPosition(
             if (view == ChatTab.Chat) chat else ledger, view == ChatTab.Chat, snapshot.hasNewer)
-        fun openSheet() {
-            sheetSaved = Saved(tab, snapshot, position())
-            reader.rendered[tab] = HistoryPaneSnapshot(snapshot, null, null, null, true)
-            sheet = true
-        }
-        fun dismissSheet(after: () -> Unit = {}) {
-            val original = sheetSaved!!
-            snapshot = original.window
-            reader.request(original.view, original.position, snapshot) { sheet = false; after() }
-        }
-        fun switchTab(target: ChatTab) {
-            saved[tab] = Saved(tab, snapshot, position())
-            reader.rendered[tab] = HistoryPaneSnapshot(snapshot, null, null, null, true)
-            saved[target]?.let { bookmark ->
-                snapshot = bookmark.window
-                reader.request(target, bookmark.position, snapshot)
-            }
-            tab = target
-        }
+        private fun capture() = HistoryPaneCapture(position(), pane())
+        fun openSheet() { reader.openHistory(tab, ::capture) }
+        fun dismissSheet(after: () -> Unit = {}) = reader.dismissHistory(after)
+        fun switchTab(target: ChatTab) = reader.switchView(tab, target, ::capture) { tab = target }
     }
 
     private fun harness(): Harness {
@@ -69,14 +74,15 @@ class HistoryReadingRestoreTest {
         compose.setContent {
             h.chat = rememberLazyListState()
             h.ledger = rememberLazyListState()
+            val scope = rememberCoroutineScope()
+            h.reader = remember { HistoryReadingState(h.access, scope, "reading") }
+            DisposableEffect(h.reader) { onDispose { h.reader.dispose() } }
             DshTheme {
                 Box(Modifier.fillMaxSize()) {
                     AnimatedContent(targetState = h.tab, label = "reading-test-tabs") { view ->
-                        val enabled = view == h.tab && !h.sheet && !h.reader.restoring
-                        val request = if (view == ChatTab.Chat) h.reader.chatRestore else h.reader.trajectoryRestore
-                        val retained = h.reader.rendered[view]?.conversation
-                        val covered = view != h.tab || ((h.sheet || h.reader.restoring) && request == null)
-                        val pane = if (covered && retained != null) retained else h.snapshot
+                        val enabled = h.reader.interactionAllowed(view, h.tab)
+                        val request = h.reader.readyRestore(view, h.snapshot)
+                        val pane = requireNotNull(h.reader.pane(view, h.tab, h.pane()).conversation)
                         when (view) {
                             ChatTab.Chat -> ChatTranscript(
                                 conversation = pane, loading = false, loadingOlder = false, loadOlderFailed = false,
@@ -84,13 +90,13 @@ class HistoryReadingRestoreTest {
                                 listState = h.chat, onLoadOlder = {}, loadingNewer = h.loadingNewer,
                                 onLoadNewer = { h.newerRequests++; h.loadingNewer = true },
                                 historyInteractionEnabled = enabled,
-                                viewportRestore = h.reader.chatRestore,
+                                viewportRestore = request,
                                 onViewportRestored = h.reader::consumed,
                             )
                             ChatTab.Trajectory -> TrajectoryTab(
                                 conversation = pane, stats = null, usage = null, cwd = null, listState = h.ledger,
                                 historyInteractionEnabled = enabled,
-                                viewportRestore = h.reader.trajectoryRestore,
+                                viewportRestore = request,
                                 onViewportRestored = h.reader::consumed,
                             )
                         }
@@ -140,6 +146,24 @@ class HistoryReadingRestoreTest {
             compose.waitForIdle()
             compose.runOnIdle { assertFalse(h.sheet) }
             assertPosition(h, ChatTab.Chat, before)
+        }
+    }
+
+    @Test fun queuedRestoreAcceptsAdditionalPrependAndAppendWithoutShrinkingTheLoadedList() {
+        val h = harness()
+        val before = compose.runOnIdle { h.position() }
+        compose.runOnIdle {
+            val original = h.snapshot
+            h.reader.request(ChatTab.Chat, before, original)
+            // A newer store publication can overtake the bookmarked snapshot before UI collection.
+            h.snapshot = window(0, 767)
+        }
+        compose.waitForIdle()
+        assertPosition(h, ChatTab.Chat, before)
+        compose.runOnIdle {
+            assertEquals(768, h.snapshot.nodes.filterIsInstance<UserMessageNode>().size)
+            assertEquals(769, h.chat.layoutInfo.totalItemsCount) // all messages plus newer sentinel
+            assertEquals(0, h.newerRequests)
         }
     }
 

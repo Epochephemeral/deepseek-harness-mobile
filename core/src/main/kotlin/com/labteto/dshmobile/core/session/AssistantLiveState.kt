@@ -218,6 +218,10 @@ class AssistantLiveState(private val diskCacheStore: DiskCacheStore? = null) {
             durableSettlementChecks++
             // A disk page can arrive ahead of this follow's live Entry. Use exactly the same
             // settlement checks as that event path, so the provisional reply is never duplicated.
+            for (settlement in durable.durableSettlements.asReversed()) {
+                if (acceptDurable(settlement.type, settlement.turn, settlement.step,
+                    settlement.seq, settlement.surfaceOp)) return durable
+            }
             for (event in durable.journal.asReversed()) {
                 if (event.type != "assistant/message" && event.type != "assistant/attempt") continue
                 val data = event.data as? JsonObject ?: continue

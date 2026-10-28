@@ -86,6 +86,10 @@ class HistoryCache(
     fun historyAround(host: String, sid: String, seq: Long, maxMessages: Int = 60, ticket: Long = ticket()): HistoryDiskPage = synchronized(lock) {
         if (ticket != epoch.value) HistoryDiskPage(emptyList(), false, false) else archive().around(host, sid, seq, maxMessages)
     }
+    /** Exact already-loaded addition, not a transfer page. Never bridge an uncached gap implicitly. */
+    fun historyRange(host: String, sid: String, fromSeq: Long, throughSeq: Long, ticket: Long = ticket()): HistoryDiskPage? = synchronized(lock) {
+        if (ticket != epoch.value) null else archive().range(host, sid, fromSeq, throughSeq)
+    }
     fun removeHistoryAfter(host: String, sid: String, throughSeq: Long, ticket: Long = ticket()): Boolean = synchronized(lock) {
         if (ticket != epoch.value) return@synchronized false
         archive().removeAfter(host, sid, throughSeq)

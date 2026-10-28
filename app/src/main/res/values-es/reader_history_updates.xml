@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_turn_label">Turno %1$d</string>
+    <string name="history_turn_no_prompt">Sin vista previa del mensaje</string>
+    <string name="history_turn_loading">Cargando turno…</string>
+    <string name="history_turn_failed">No se pudo abrir este turno. Toca para reintentar.</string>
+    <string name="history_window_empty">No hay mensajes enviados en la parte cargada. Carga mensajes anteriores o posteriores para ver más.</string>
+    <string name="reader_tool_result">Resultado de la herramienta</string>
+    <string name="reader_tool_running">En ejecución</string>
+    <string name="reader_tool_done">Listo</string>
+    <string name="reader_tool_error">Error</string>
+    <string name="reader_tool_unknown">Estado no disponible</string>
+    <string name="reader_task_pending">Pendiente</string>
+    <string name="reader_task_running">En curso</string>
+    <string name="reader_task_done">Completada</string>
+    <string name="reader_image_reference">Imagen adjunta</string>
+    <string name="reader_image_preview">Toca para cargar la vista previa</string>
+    <string name="chatlist_refresh">Actualizar lista de sesiones</string>
+    <string name="chatlist_refreshing">Actualizando lista de sesiones…</string>
+    <string name="chatlist_refresh_failed">No se pudo actualizar. Comprueba la conexión e inténtalo de nuevo.</string>
+    <string name="chat_zen_enter">Entrar en modo zen</string>
+    <string name="chat_zen_exit">Salir del modo zen</string>
+    <string name="chat_zen_menu">Opciones del chat</string>
+    <string name="chat_zen_permissions">Permisos</string>
+</resources>
