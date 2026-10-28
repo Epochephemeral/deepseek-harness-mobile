@@ -1,6 +1,6 @@
 # Reader host dependency
 
-Server implementation, source patches, generated package patches, tests and build provenance are maintained only in the personal [DSH Desktop fork](https://github.com/Epochephemeral/dsh-desktop/tree/personal-reader/runtime-customizations/session-reader). That repository is a GitHub fork of [anywhere-labs/dsh-desktop](https://github.com/anywhere-labs/dsh-desktop) and owns the source/package patches for its existing Yarn patch mechanism. Default Desktop packaging integration is still pending; the existing installation continues using its verified profile overlay. The official framework pin remains unchanged; a separate personal DSH fork is not required.
+Server implementation, source patches, generated package patches, tests and build provenance are maintained only in the personal [DSH Desktop fork](https://github.com/Epochephemeral/dsh-desktop/tree/master/runtime-customizations/session-reader). That repository is a GitHub fork of [anywhere-labs/dsh-desktop](https://github.com/anywhere-labs/dsh-desktop) and owns the source/package patches for its existing Yarn patch mechanism. Default Desktop packaging integration is still pending; the existing installation continues using its verified profile overlay. The official framework pin remains unchanged; a separate personal DSH fork is not required.
 
 This mobile repository owns only the client and its protocol/UX tests. Do not add another server implementation patch here.
 
