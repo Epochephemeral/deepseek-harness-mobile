@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">Android’s background time limit was reached. Reopen the app to restore background protection; notifications may be delayed.</string>
+    <string name="background_start_restricted">Android restricted the background connection service. Keep the app open to receive updates.</string>
+</resources>

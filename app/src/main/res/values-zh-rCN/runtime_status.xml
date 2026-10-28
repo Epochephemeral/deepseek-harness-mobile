@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">已达到 Android 后台运行时限。重新打开应用可恢复后台保护；通知可能延迟。</string>
+    <string name="background_start_restricted">Android 限制了后台连接服务。请保持应用打开以接收更新。</string>
+</resources>

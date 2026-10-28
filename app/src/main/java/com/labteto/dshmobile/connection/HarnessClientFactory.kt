@@ -32,6 +32,7 @@ class HarnessClientFactory @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val credentials: RelayCredentialStore,
     private val sessions: HarnessSessionStore,
+    private val diskCacheStore: com.labteto.dshmobile.core.storage.DiskCacheStore? = null,
 ) {
     /**
      * Pinned clients, one per fingerprint.
@@ -84,6 +85,7 @@ class HarnessClientFactory @Inject constructor(
                 readTimeoutMs = timeouts?.readMs ?: DEFAULT_TIMEOUT_MS,
                 authorization = authorization,
                 cookie = cookieFor(config),
+                diskCacheStore = diskCacheStore,
             ),
         )
     }
@@ -99,9 +101,10 @@ class HarnessClientFactory @Inject constructor(
                 client = http,
                 authorization = authorization,
                 cookie = cookie,
+                diskCacheStore = diskCacheStore,
             ),
         )
-        val mux = RemoteStreamMux { sink ->
+        val mux = RemoteStreamMux(diskStore = diskCacheStore) { sink ->
             WsChannel(com.labteto.dshmobile.core.wire.resolveHarnessUrl(config.baseUrl, REMOTE_STREAM_MUX_PATH).toString(), http, sink, authorization, cookie)
         }
         return HarnessConnection(api, mux)
@@ -119,6 +122,7 @@ class HarnessClientFactory @Inject constructor(
             client = okHttpClient,
             connectTimeoutMs = timeouts.connectMs,
             readTimeoutMs = timeouts.readMs,
+            diskCacheStore = diskCacheStore,
         ),
     )
 

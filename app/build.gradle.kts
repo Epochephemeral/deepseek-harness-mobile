@@ -1,3 +1,6 @@
+import java.net.URI
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -29,12 +32,29 @@ val dshVersionCode: Int = dshVersionName
     }
     .coerceAtLeast(1)
 
+// Personal endpoint values stay in the ignored local.properties file.
+val personalBuildProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+val defaultHostUrl = personalBuildProperties.getProperty("dsh.defaultHostUrl", "").trim().let { raw ->
+    if (raw.isEmpty()) "" else {
+        val uri = URI(raw)
+        require(uri.scheme in setOf("http", "https") && uri.host != null &&
+            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
+            (uri.port == -1 || uri.port in 1..65535)) {
+            "dsh.defaultHostUrl must be an HTTP(S) endpoint without credentials, query or fragment"
+        }
+        uri.toASCIIString()
+    }
+}
+
 android {
     namespace = "com.labteto.dshmobile"
     compileSdk = 35
 
     defaultConfig {
         applicationId = "com.labteto.dshmobile"
+        buildConfigField("String", "DEFAULT_HOST_URL", "\"$defaultHostUrl\"")
         minSdk = 26
         targetSdk = 35
         versionCode = dshVersionCode

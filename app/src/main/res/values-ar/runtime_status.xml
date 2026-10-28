@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">تم بلوغ الحد الزمني للعمل في خلفية Android. أعد فتح التطبيق لاستعادة الحماية؛ قد تتأخر الإشعارات.</string>
+    <string name="background_start_restricted">قيّد Android خدمة الاتصال في الخلفية. أبقِ التطبيق مفتوحًا لتلقي التحديثات.</string>
+</resources>

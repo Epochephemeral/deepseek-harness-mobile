@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">ถึงขีดจำกัดเวลาทำงานเบื้องหลังของ Android แล้ว เปิดแอปอีกครั้งเพื่อคืนการป้องกัน การแจ้งเตือนอาจล่าช้า</string>
+    <string name="background_start_restricted">Android จำกัดบริการเชื่อมต่อเบื้องหลัง โปรดเปิดแอปไว้เพื่อรับการอัปเดต</string>
+</resources>

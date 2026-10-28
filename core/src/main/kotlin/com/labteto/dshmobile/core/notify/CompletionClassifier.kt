@@ -44,8 +44,9 @@ sealed interface CompletionEvent {
         override val sessionId: String,
         override val seq: Long,
         val firstQuestion: String?,
+        val eventId: String,
     ) : CompletionEvent {
-        override val dedupKey: String get() = "question:$sessionId:$seq"
+        override val dedupKey: String get() = "question:$sessionId:$eventId"
     }
 
     /** A session that was running stopped (fallback completion signal). */
@@ -82,7 +83,9 @@ class CompletionClassifier {
             }
 
             "goal/change" -> {
-                val goal = data?.get("goal")?.jsonObject ?: return null
+                // A clear tombstone may explicitly encode goal:null (GoalChangeData).
+                // JsonNull.jsonObject throws and would interrupt the session follow collector.
+                val goal = data?.get("goal") as? JsonObject ?: return null
                 when (goal["phase"]?.jsonPrimitive?.contentOrNull) {
                     "complete" -> CompletionEvent.GoalComplete(
                         sessionId,
@@ -135,6 +138,7 @@ class CompletionClassifier {
         "user-questions/request" -> CompletionEvent.QuestionRequested(
             sessionId = agentId,
             seq = 0L,
+            eventId = eventId,
             firstQuestion = (request["questions"] as? kotlinx.serialization.json.JsonArray)
                 ?.firstOrNull()?.jsonObject?.get("question")?.jsonPrimitive?.contentOrNull,
         )
@@ -153,6 +157,7 @@ class CompletionClassifier {
      * was disconnected produces no notification at all, which is why nothing here may be treated
      * as a durable record of what happened.
      */
+    @Synchronized
     fun classifyNotification(event: String, args: List<JsonElement>): CompletionEvent? {
         if (event != "api-session/status") return null
         val sessionId = args.getOrNull(0)?.jsonPrimitive?.contentOrNull ?: return null
@@ -170,6 +175,7 @@ class CompletionClassifier {
         return CompletionEvent.SessionIdle(sessionId, transition)
     }
 
+    @Synchronized
     fun markSessionRunning(sessionId: String) {
         running.add(sessionId)
     }

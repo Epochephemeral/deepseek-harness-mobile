@@ -17,6 +17,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -47,8 +48,19 @@ class NotificationObserver @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val classifier = CompletionClassifier()
+    private val classifiers = LinkedHashMap<NotificationHost, CompletionClassifier>()
+    private val stateLock = Any()
     private val seen = LinkedHashSet<String>()
+
+    private fun classifier(host: NotificationHost): CompletionClassifier = synchronized(stateLock) {
+        classifiers.getOrPut(host) { CompletionClassifier() }.also {
+            while (classifiers.size > 8) classifiers.remove(classifiers.keys.first())
+        }
+    }
+
+    private fun currentHost(): NotificationHost? = connectionManager.state.value.host?.let {
+        NotificationHost(it.id, it.baseUrl)
+    }
 
     @Volatile
     private var settings = AppSettings()
@@ -66,16 +78,23 @@ class NotificationObserver @Inject constructor(
     @Volatile
     private var appInForeground = false
 
+    @Synchronized
     fun start() {
         if (started) return
+        // Install synchronously, before any connection recovery or stream collector can run.
+        store.notificationSink = ::onSessionEvent
         started = true
         notifications.ensureChannels()
         trackAppForeground()
         scope.launch {
             hostsStore.settings.collect { settings = it }
         }
-        scope.launch {
-            connectionManager.eventFrames.collect { handleEventFrame(it) }
+        // Register before start() returns: a fast cold restore may publish before a dispatched
+        // collector starts, and SharedFlow intentionally has no replay across host generations.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            connectionManager.collectHostFrames {
+                handleEventFrame(NotificationHost(it.hostId, it.hostBaseUrl), it.frame)
+            }
         }
     }
 
@@ -106,14 +125,16 @@ class NotificationObserver @Inject constructor(
         )
     }
 
-    private fun handleEventFrame(frame: RemoteEventFrame) {
+    private fun handleEventFrame(host: NotificationHost, frame: RemoteEventFrame) {
+        if (host != currentHost()) return
+        val classifier = classifier(host)
         when (frame) {
             is RemoteEventFrame.Waterfall ->
                 classifier.classifyWaterfall(frame.event, frame.eventId, frame.agentId, frame.request)
-                    ?.let { maybeNotify(it) }
+                    ?.let { maybeNotify(host, it) }
 
             is RemoteEventFrame.Emit ->
-                classifier.classifyNotification(frame.event, frame.args)?.let { maybeNotify(it) }
+                classifier.classifyNotification(frame.event, frame.args)?.let { maybeNotify(host, it) }
 
             // A withdrawn request needs no notification of its own; the prompt it belongs to is
             // retired by whoever is showing it. Ready never reaches here, and an unknown frame
@@ -132,16 +153,19 @@ class NotificationObserver @Inject constructor(
      * opening one follow per session purely to watch for completions would resume agents the user
      * never opened.
      */
-    fun onSessionEvent(sessionId: String, envelope: SessionEventEnvelope) {
+    fun onSessionEvent(hostKey: String, sessionId: String, envelope: SessionEventEnvelope) {
+        val host = currentHost() ?: return
+        if (hostKey != "${host.baseUrl}|${host.id}") return
+        val classifier = classifier(host)
         when (envelope.type) {
             "turn/start" -> classifier.markSessionRunning(sessionId)
             "turn/end", "goal/change" ->
-                classifier.classifyEvent(sessionId, envelope)?.let { maybeNotify(it) }
+                classifier.classifyEvent(sessionId, envelope)?.let { maybeNotify(host, it) }
         }
     }
 
-    private fun maybeNotify(event: CompletionEvent) {
-        if (!notifications.canPost()) return
+    private fun maybeNotify(host: NotificationHost, event: CompletionEvent) {
+        if (host != currentHost() || !notifications.canPost()) return
         // Suppress only the completion the user can already see happening.
         if (appInForeground && store.isSessionOpen(event.sessionId)) return
 
@@ -191,11 +215,14 @@ class NotificationObserver @Inject constructor(
             }
         }
 
-        if (isDuplicate(event.dedupKey)) return
+        if (isDuplicate("${host.key}:${event.dedupKey}")) return
 
         val text = context.getString(R.string.notif_open)
-        val id = notificationId(event.sessionId, spec.channel)
-        notifications.postSession(spec.channel, id, spec.title, text, event.sessionId, spec.actionLabel)
+        val destination = NotificationDestination(host, event.sessionId)
+        val id = notificationId(destination, spec.channel)
+        if (host == currentHost()) {
+            notifications.postSession(spec.channel, id, spec.title, text, destination, spec.actionLabel)
+        }
     }
 
     private data class Spec(
@@ -207,13 +234,13 @@ class NotificationObserver @Inject constructor(
     private fun sessionTitle(sessionId: String): String? =
         store.sessions.value.firstOrNull { it.sessionId == sessionId }?.title
 
-    private fun notificationId(sessionId: String, channel: String): Int {
+    private fun notificationId(destination: NotificationDestination, channel: String): Int {
         val offset = when (channel) {
             DshNotifications.CHANNEL_ACTION -> CHANNEL_ACTION_OFFSET
             DshNotifications.CHANNEL_CONNECTION -> CHANNEL_CONNECTION_OFFSET
             else -> CHANNEL_COMPLETIONS_OFFSET
         }
-        val base = ((sessionId.hashCode() % 1000) + 1000) % 1000
+        val base = ((destination.key.hashCode() % 1000) + 1000) % 1000
         return base + offset
     }
 

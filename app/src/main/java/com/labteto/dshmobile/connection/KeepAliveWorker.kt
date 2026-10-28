@@ -14,7 +14,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
 
-/** Periodically asks the manager to recover an eligible in-memory connection. */
+/** Best-effort cold recovery. Android may deny foreground-service launch from periodic work. */
 class KeepAliveWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -30,7 +30,9 @@ class KeepAliveWorker(
     override suspend fun doWork(): Result {
         val entry = EntryPointAccessors.fromApplication(applicationContext, WorkerEntryPoint::class.java)
         if (!entry.hostsStore().settingsOnce().keepConnectedInBackground) return Result.success()
-        entry.connectionManager().recoverIfNeeded()
+        // No setForeground(), alarm, or retry loop to evade FGS/time-budget restrictions. If the
+        // platform rejects a service start the manager exposes START_RESTRICTED until foreground.
+        entry.connectionManager().restoreBackgroundConnection()
         return Result.success()
     }
 
@@ -38,8 +40,8 @@ class KeepAliveWorker(
         const val WORK_NAME = "dsh-keep-alive"
 
         /**
-         * Best-effort fallback while the process retains a desired connection, not cold-process
-         * recovery: a newly created manager has no target host. WorkManager timing is inexact.
+         * Best-effort fallback using the separately persisted connection intent. WorkManager
+         * timing is inexact; force-stop/Doze and foreground-service restrictions still apply.
          */
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)

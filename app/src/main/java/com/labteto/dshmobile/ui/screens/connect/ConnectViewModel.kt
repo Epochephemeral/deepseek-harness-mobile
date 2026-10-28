@@ -81,6 +81,7 @@ data class ConnectUiState(
      */
     val mode: String = ConnectMode.LAN,
     val remembered: List<HostConfig> = emptyList(),
+    val initialHost: HostConfig? = null,
     /** Liveness per remembered host, keyed by `host:port`. Absent = not probed yet. */
     val recentStatus: Map<String, HostProbe> = emptyMap(),
     val discovered: List<DiscoveredHost> = emptyList(),
@@ -283,6 +284,7 @@ class ConnectViewModel @Inject constructor(
             // First run only. A phone with Termux and no remembered harness is, far more often
             // than not, the harness's own phone. A stored mode always wins, so this decides
             // nothing for an install that has been used even once.
+            hostsStore.ensureConfiguredHost()
             hostsStore.setConnectModeIfUnset {
                 if (termux.termuxInstalled && hostsStore.hosts.first().isEmpty()) ConnectMode.LOOPBACK else ConnectMode.LAN
             }
@@ -291,6 +293,8 @@ class ConnectViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     mode = settings.connectMode,
+                    initialHost = com.labteto.dshmobile.connection.initialConnectionHost(
+                        settings.connectMode, hostsStore.hosts.first(), com.labteto.dshmobile.BuildConfig.DEFAULT_HOST_URL),
                     autoConnectLast = settings.autoConnectLast,
                     autoConnectLan = settings.autoConnectLan,
                     autoConnectLoopback = settings.autoConnectLoopback,
@@ -385,11 +389,10 @@ class ConnectViewModel @Inject constructor(
         if (settings.autoConnectLast) {
             val last = hostsStore.hosts.first().firstOrNull { it.belongsTo(mode) }
             if (last != null) {
-                val desc = discoveryEngine.probe(last.host, last.port, ProbeTimeouts.Manual, config = last)
-                if (desc != null) {
-                    connectTo(last)
-                    return
-                }
+                // A remembered endpoint remains the target while it is temporarily asleep or
+                // unreachable. ConnectionLoop owns readiness checks and continued retries.
+                connectTo(last)
+                return
             }
         }
         if (relayMode) {

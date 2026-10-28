@@ -24,8 +24,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideHistoryCache(@ApplicationContext context: Context) =
-        com.labteto.dshmobile.data.HistoryCache(java.io.File(context.cacheDir, "session-history"))
+    fun provideDiskCacheStore(@ApplicationContext context: Context) =
+        com.labteto.dshmobile.core.storage.DiskCacheStore(java.io.File(context.noBackupFilesDir, "managed-cache"))
+
+    @Provides
+    @Singleton
+    fun provideHistoryCache(
+        @ApplicationContext context: Context,
+        store: com.labteto.dshmobile.core.storage.DiskCacheStore,
+    ): com.labteto.dshmobile.data.HistoryCache =
+        // Retain the existing disposable preview location and capacity setting. The full archive
+        // and processing spools live in noBackupFilesDir; both are counted/cleared by HistoryCache.
+        com.labteto.dshmobile.data.HistoryCache(
+            java.io.File(context.cacheDir, "session-history"), diskStore = store,
+        )
 
     @Provides
     @Singleton

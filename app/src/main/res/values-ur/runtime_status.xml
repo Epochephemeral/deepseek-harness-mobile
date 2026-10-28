@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">Android کی پس منظر کی وقت کی حد پوری ہو گئی۔ تحفظ بحال کرنے کے لیے ایپ دوبارہ کھولیں؛ اطلاعات میں تاخیر ہو سکتی ہے۔</string>
+    <string name="background_start_restricted">Android نے پس منظر کی کنکشن سروس محدود کر دی۔ اپ ڈیٹس حاصل کرنے کے لیے ایپ کھلی رکھیں۔</string>
+</resources>

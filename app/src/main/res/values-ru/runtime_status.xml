@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">Достигнут лимит фоновой работы Android. Откройте приложение снова для восстановления защиты; уведомления могут задерживаться.</string>
+    <string name="background_start_restricted">Android ограничил службу фонового подключения. Держите приложение открытым для получения обновлений.</string>
+</resources>

@@ -54,17 +54,11 @@ class DshNotifications @Inject constructor(
         id: Int,
         title: String,
         text: String,
-        sessionId: String?,
+        destination: NotificationDestination,
         actionLabel: String? = null,
     ) {
         if (!canPost()) return
-        val open = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            if (sessionId != null) {
-                data = android.net.Uri.parse("dshmobile://host/current/session/$sessionId")
-                putExtra(EXTRA_SESSION_ID, sessionId)
-            }
-        }
+        val open = sessionIntent(context, destination)
         val pending = PendingIntent.getActivity(
             context,
             id,
@@ -81,13 +75,25 @@ class DshNotifications @Inject constructor(
         if (actionLabel != null) {
             builder.addAction(0, actionLabel, pending)
         }
-        NotificationManagerCompat.from(context).notify(id, builder.build())
+        // Tags make even hash-colliding ids distinct across hosts, sessions and channels.
+        NotificationManagerCompat.from(context).notify("$channel:${destination.key}", id, builder.build())
     }
 
     companion object {
         const val CHANNEL_COMPLETIONS = "completions"
         const val CHANNEL_ACTION = "needs_action"
         const val CHANNEL_CONNECTION = "connection"
-        const val EXTRA_SESSION_ID = "dsh_session_id"
+        const val ACTION_OPEN_SESSION = "com.labteto.dshmobile.OPEN_NOTIFICATION_SESSION"
+
+        fun sessionIntent(context: Context, destination: NotificationDestination): Intent =
+            Intent(context, MainActivity::class.java).apply {
+                action = ACTION_OPEN_SESSION
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                data = android.net.Uri.parse(destination.uri())
+            }
+
+        /** Legacy host/current links deliberately fail closed: they have no trustworthy host identity. */
+        fun destinationFromIntent(intent: Intent?): NotificationDestination? =
+            if (intent?.action == ACTION_OPEN_SESSION) NotificationDestination.parse(intent.dataString) else null
     }
 }

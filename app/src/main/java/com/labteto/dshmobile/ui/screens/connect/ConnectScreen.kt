@@ -126,6 +126,18 @@ fun ConnectScreen(
     // Saveable: a rotation mid-connect used to wipe a hand-typed address.
     var host by rememberSaveable { mutableStateOf("") }
     var port by rememberSaveable { mutableStateOf("3080") }
+    var initialHostApplied by rememberSaveable { mutableStateOf(false) }
+    var connectionFieldsEdited by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.initialHost) {
+        val saved = state.initialHost ?: return@LaunchedEffect
+        if (!initialHostApplied) {
+            initialHostApplied = true
+            if (!connectionFieldsEdited && host.isBlank() && port == "3080") {
+                host = saved.baseUrl
+                port = saved.port.toString()
+            }
+        }
+    }
     // Whatever was tapped last, so a failure can offer to do it again. A failure used to end in a
     // block of advice and nothing to press; the only way to retry was to find the card again.
     var lastAttempt by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -336,7 +348,7 @@ fun ConnectScreen(
                                 val clipboard = LocalClipboardManager.current
                                 TextField(
                                     value = host,
-                                    onValueChange = { host = it },
+                                    onValueChange = { connectionFieldsEdited = true; host = it },
                                     modifier = Modifier.weight(1f),
                                     placeholder = {
                                         Text(stringResource(R.string.connect_host_hint), style = DsType.std14)
@@ -360,7 +372,7 @@ fun ConnectScreen(
                                         DsIconButton(
                                             icon = Icons.Outlined.ContentPaste,
                                             contentDescription = stringResource(R.string.connect_paste),
-                                            onClick = { clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { host = it } },
+                                            onClick = { clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { connectionFieldsEdited = true; host = it } },
                                             tint = colors.labelTertiary,
                                         )
                                     },
@@ -368,7 +380,7 @@ fun ConnectScreen(
                                 Spacer(Modifier.width(DsSpacing.compact))
                                 TextField(
                                     value = port,
-                                    onValueChange = { port = it.filter { c -> c.isDigit() } },
+                                    onValueChange = { connectionFieldsEdited = true; port = it.filter { c -> c.isDigit() } },
                                     modifier = Modifier.width(92.dp),
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
@@ -1105,33 +1117,10 @@ private fun ConnectProgressRow(stage: ConnectStage, attempted: String?) {
  * PowerShell.
  */
 @Composable
-private fun ConnectFailureBlock(
-    failure: ConnectFailure,
-    attempted: String?,
-    retrying: Boolean,
-    onCancel: () -> Unit,
-    onPair: () -> Unit,
-    onSignIn: () -> Unit,
-    onRetry: (() -> Unit)? = null,
-) {
-    val colors = DsTheme.colors
-    val authority = attempted.orEmpty()
+internal fun connectionFailureMessage(failure: ConnectFailure, authority: String): String {
     val address = parseHostInput(authority)
     val port = address?.port ?: if (address?.useTls == true) 443 else 80
-    // Display the complete endpoint, including its proxy prefix; parse only for port-specific advice.
-    val title = when {
-        failure is ConnectFailure.TrustFence -> stringResource(R.string.connect_fail_fence_title)
-        failure is ConnectFailure.PairingRequired -> stringResource(R.string.connect_fail_pairing_title)
-        failure is ConnectFailure.RelayUnauthenticated ->
-            stringResource(R.string.connect_fail_relay_session_title)
-        failure is ConnectFailure.CertificateChanged -> stringResource(R.string.connect_fail_certificate_title)
-        authority.isBlank() -> null
-        else -> stringResource(
-            R.string.connect_failed,
-            authority,
-        )
-    }
-    val body = when (failure) {
+    return when (failure) {
         ConnectFailure.InvalidInput -> stringResource(R.string.connect_fail_invalid)
         is ConnectFailure.DifferentSubnet -> stringResource(
             R.string.connect_fail_subnet,
@@ -1152,6 +1141,34 @@ private fun ConnectFailureBlock(
         ConnectFailure.StreamsBlocked -> stringResource(R.string.connect_fail_streams, authority)
         is ConnectFailure.Other -> stringResource(R.string.connect_fail_other, authority, failure.detail)
     }
+}
+
+@Composable
+private fun ConnectFailureBlock(
+    failure: ConnectFailure,
+    attempted: String?,
+    retrying: Boolean,
+    onCancel: () -> Unit,
+    onPair: () -> Unit,
+    onSignIn: () -> Unit,
+    onRetry: (() -> Unit)? = null,
+) {
+    val colors = DsTheme.colors
+    val authority = attempted.orEmpty()
+    // Display the complete endpoint, including its proxy prefix; parse only for port-specific advice.
+    val title = when {
+        failure is ConnectFailure.TrustFence -> stringResource(R.string.connect_fail_fence_title)
+        failure is ConnectFailure.PairingRequired -> stringResource(R.string.connect_fail_pairing_title)
+        failure is ConnectFailure.RelayUnauthenticated ->
+            stringResource(R.string.connect_fail_relay_session_title)
+        failure is ConnectFailure.CertificateChanged -> stringResource(R.string.connect_fail_certificate_title)
+        authority.isBlank() -> null
+        else -> stringResource(
+            R.string.connect_failed,
+            authority,
+        )
+    }
+    val body = connectionFailureMessage(failure, authority)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,

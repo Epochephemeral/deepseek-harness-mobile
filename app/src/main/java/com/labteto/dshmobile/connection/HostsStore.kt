@@ -89,18 +89,49 @@ class HostsStore @Inject constructor(
 
     suspend fun settingsOnce(): AppSettings = settings.first()
 
-    suspend fun upsertHost(config: HostConfig) {
-        val current = hosts.first().toMutableList()
-        current.removeAll { it.id == config.id || it.baseUrl == config.baseUrl }
-        current.add(0, config)
-        persist(current)
+    /** Read opt-in and remembered targets from the same DataStore version for cold recovery. */
+    suspend fun backgroundRecoverySnapshot(): BackgroundRecoverySnapshot {
+        val prefs = dataStore.data.first()
+        return BackgroundRecoverySnapshot(
+            enabled = prefs[Keys.BACKGROUND] ?: false,
+            hosts = decodeHosts(prefs),
+        )
+    }
+
+    private fun decodeHosts(prefs: Preferences): List<HostConfig> = prefs[Keys.HOSTS]?.let { raw ->
+        runCatching { WireJson.decodeFromString(hostsSerializer, raw) }.getOrDefault(emptyList())
+    }.orEmpty()
+
+    /** Seed a fresh install only. An explicitly saved or forgotten host list always wins. */
+    suspend fun ensureConfiguredHost(raw: String = com.labteto.dshmobile.BuildConfig.DEFAULT_HOST_URL) {
+        val host = configuredHost(raw) ?: return
+        dataStore.edit { prefs ->
+            if (prefs[Keys.HOSTS] == null) {
+                prefs[Keys.HOSTS] = WireJson.encodeToString(hostsSerializer, listOf(host))
+                if (prefs[Keys.CONNECT_MODE] == null) {
+                    prefs[Keys.CONNECT_MODE] = if (host.isLoopback) ConnectMode.LOOPBACK else ConnectMode.LAN
+                }
+            }
+        }
+    }
+
+    suspend fun upsertHost(config: HostConfig, stillDesired: () -> Boolean = { true }) {
+        dataStore.edit { prefs ->
+            if (!stillDesired()) return@edit
+            val current = decodeHosts(prefs).toMutableList()
+            current.removeAll { it.id == config.id || it.baseUrl == config.baseUrl }
+            current.add(0, config)
+            prefs[Keys.HOSTS] = WireJson.encodeToString(hostsSerializer, current)
+        }
     }
 
     suspend fun touchHost(id: String) {
-        val current = hosts.first().map {
-            if (it.id == id) it.copy(lastConnectedAt = System.currentTimeMillis()) else it
+        dataStore.edit { prefs ->
+            val current = decodeHosts(prefs).map {
+                if (it.id == id) it.copy(lastConnectedAt = System.currentTimeMillis()) else it
+            }
+            prefs[Keys.HOSTS] = WireJson.encodeToString(hostsSerializer, current)
         }
-        persist(current)
     }
 
     /**

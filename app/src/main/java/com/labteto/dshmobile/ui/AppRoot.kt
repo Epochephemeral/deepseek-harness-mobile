@@ -1,5 +1,6 @@
 package com.labteto.dshmobile.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +59,9 @@ import com.labteto.dshmobile.update.AvailableUpdate
 fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val connection by viewModel.connectionState.collectAsStateWithLifecycle()
+    val routingNotification by viewModel.routingNotification.collectAsStateWithLifecycle()
+    val notificationRouteRevision by viewModel.notificationRouteRevision.collectAsStateWithLifecycle()
+    BackHandler(enabled = routingNotification) { viewModel.cancelNotificationRoute() }
     val themePreference = remember(settings.themePreference) {
         runCatching { ThemePreference.valueOf(settings.themePreference.uppercase()) }
             .getOrDefault(ThemePreference.SYSTEM)
@@ -92,9 +98,16 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
         // back to an empty address field would lose the one thing the user had already supplied.
         var showPair by rememberSaveable { mutableStateOf(false) }
         var pairUrl by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(notificationRouteRevision) {
+            if (notificationRouteRevision > 0) {
+                showSettings = false
+                showPair = false
+            }
+        }
         val showMain = connection.phase == ConnectionPhase.CONNECTED ||
             (connection.phase == ConnectionPhase.RECONNECTING && connection.hasConnected)
         val route = when {
+            routingNotification -> RootRoute.Notification
             showSettings -> RootRoute.Settings
             showPair -> RootRoute.Pair
             showMain -> RootRoute.Main
@@ -111,6 +124,15 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
                 label = "rootRoute",
             ) { current ->
                 when (current) {
+                    RootRoute.Notification -> Column(
+                        Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(DsSpacing.medium, Alignment.CenterVertically),
+                    ) {
+                        CircularProgressIndicator()
+                        Text(stringResource(R.string.common_loading))
+                        DsButton(stringResource(R.string.common_cancel), onClick = viewModel::cancelNotificationRoute)
+                    }
                     RootRoute.Settings -> SettingsScreen(onClose = { showSettings = false })
                     RootRoute.Pair -> PairScreen(onClose = { showPair = false }, prefillUrl = pairUrl)
                     RootRoute.Main -> MainScreen(onOpenSettings = { showSettings = true })
@@ -152,7 +174,7 @@ fun AppRoot(viewModel: AppViewModel = hiltViewModel()) {
 }
 
 /** The top-level screens [AppRoot] switches between. */
-private enum class RootRoute { Connect, Main, Settings, Pair }
+private enum class RootRoute { Connect, Main, Settings, Pair, Notification }
 
 /**
  * "There is a newer release."

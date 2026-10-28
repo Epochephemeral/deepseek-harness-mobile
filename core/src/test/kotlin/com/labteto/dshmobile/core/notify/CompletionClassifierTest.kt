@@ -38,6 +38,36 @@ class CompletionClassifierTest {
     }
 
     @Test
+    fun goalClearWithExplicitNullDoesNotInterruptLaterCompletion() {
+        // GoalChangeData permits a null goal on operation=clear. Exercise the actual DTO,
+        // including serializers configured to retain nulls, rather than an invented payload.
+        val json = kotlinx.serialization.json.Json { explicitNulls = true; encodeDefaults = true }
+        val clear = json.encodeToJsonElement(
+            com.labteto.dshmobile.core.wire.dto.GoalChangeData.serializer(),
+            com.labteto.dshmobile.core.wire.dto.GoalChangeData(
+                operation = "clear",
+                cleared = com.labteto.dshmobile.core.wire.dto.GoalRef("g1", 2),
+                clearedAt = 10,
+            ),
+        ) as kotlinx.serialization.json.JsonObject
+        assertEquals(kotlinx.serialization.json.JsonNull, clear["goal"])
+        assertNull(classifier.classifyEvent("s1", event("goal/change", 10, clear)))
+        assertTrue(classifier.classifyEvent("s1", event("turn/end", 11, buildJsonObject {
+            put("turn", 2)
+            putJsonObject("reason") { put("kind", "completed") }
+        })) is CompletionEvent.TurnComplete)
+    }
+
+    @Test
+    fun assistantStepsAndMessagesAreNotTaskCompletionSignals() {
+        for (type in listOf("step/end", "assistant/message", "assistant/attempt", "user/message", "tool/result")) {
+            assertNull(type, classifier.classifyEvent("s1", event(type, 4, buildJsonObject {
+                put("turn", 1); put("step", 2)
+            })))
+        }
+    }
+
+    @Test
     fun goalCompleteFires() {
         val result = classifier.classifyEvent("s1", event("goal/change", 9, buildJsonObject {
             put("kind", "goal/change")
@@ -86,6 +116,36 @@ class CompletionClassifierTest {
         val result = classifier.classifyWaterfall("user-questions/request", "evt-2", "s1", request)
         assertTrue(result is CompletionEvent.QuestionRequested)
         assertEquals("which one?", (result as CompletionEvent.QuestionRequested).firstQuestion)
+    }
+
+    @Test
+    fun distinctQuestionEventIdsNotifyButReplayRetainsItsKey() {
+        val request = buildJsonObject { putJsonArray("questions") { } }
+        val first = classifier.classifyWaterfall("user-questions/request", "event-a", "same-session", request)!!
+        val second = classifier.classifyWaterfall("user-questions/request", "event-b", "same-session", request)!!
+        val replay = classifier.classifyWaterfall("user-questions/request", "event-a", "same-session", request)!!
+        assertTrue(first.dedupKey != second.dedupKey)
+        assertEquals(first.dedupKey, replay.dedupKey)
+        assertEquals("question:same-session:event-a", first.dedupKey)
+    }
+
+    @Test
+    fun followAndHostCollectorsCanUpdateClassifierConcurrently() {
+        val workers = (0 until 8).map { worker ->
+            Thread {
+                repeat(1000) { index ->
+                    val session = "$worker-$index"
+                    classifier.markSessionRunning(session)
+                    assertTrue(classifier.classifyNotification("api-session/status",
+                        listOf(JsonPrimitive(session), JsonPrimitive(false))) is CompletionEvent.SessionIdle)
+                }
+            }
+        }
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        workers.forEach { it.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, failure -> failures.add(failure) } }
+        workers.forEach(Thread::start)
+        workers.forEach(Thread::join)
+        assertTrue("Concurrent classification failed: $failures", failures.isEmpty())
     }
 
     @Test

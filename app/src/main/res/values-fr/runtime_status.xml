@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">La limite de temps en arrière-plan Android a été atteinte. Rouvrez l’application pour rétablir la protection ; les notifications peuvent être retardées.</string>
+    <string name="background_start_restricted">Android a restreint le service de connexion en arrière-plan. Gardez l’application ouverte pour recevoir les mises à jour.</string>
+</resources>

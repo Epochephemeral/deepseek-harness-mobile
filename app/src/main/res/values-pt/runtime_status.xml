@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_time_limit_reached">O limite de tempo em segundo plano do Android foi atingido. Reabra o app para restaurar a proteção; as notificações podem atrasar.</string>
+    <string name="background_start_restricted">O Android restringiu o serviço de conexão em segundo plano. Mantenha o app aberto para receber atualizações.</string>
+</resources>

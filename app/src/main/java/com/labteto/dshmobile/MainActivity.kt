@@ -1,8 +1,10 @@
 package com.labteto.dshmobile
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -13,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.labteto.dshmobile.connection.HostsStore
 import com.labteto.dshmobile.notify.DshNotifications
 import com.labteto.dshmobile.ui.AppRoot
+import com.labteto.dshmobile.ui.AppViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,6 +25,7 @@ class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var hostsStore: HostsStore
     @Inject lateinit var notifications: DshNotifications
+    private val appViewModel: AppViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -63,9 +67,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // SavedStateHandle restores an unfinished route; do not replay an already-consumed launch
+        // Intent on a configuration change. Warm deliveries use onNewIntent below.
+        if (savedInstanceState == null) consumeNotificationIntent(intent)
         setContent {
-            AppRoot()
+            AppRoot(viewModel = appViewModel)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeNotificationIntent(intent)
+    }
+
+    private fun consumeNotificationIntent(intent: Intent?) {
+        DshNotifications.destinationFromIntent(intent)?.let(appViewModel::openNotification)
     }
 
     /**

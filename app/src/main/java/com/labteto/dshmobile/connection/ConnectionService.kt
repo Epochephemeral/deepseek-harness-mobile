@@ -11,6 +11,15 @@ import com.labteto.dshmobile.R
 import com.labteto.dshmobile.notify.DshNotifications
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import android.util.Log
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Foreground service that keeps the WebSocket connection alive while the app
@@ -24,21 +33,55 @@ class ConnectionService : Service() {
     @Inject lateinit var connectionManager: ConnectionManager
     @Inject lateinit var notifications: DshNotifications
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var restoreJob: Job? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            connectionManager.disconnect()
             stopSelf()
             return START_NOT_STICKY
         }
-        // Meet the foreground-service deadline before inspecting or recovering the connection.
-        startForeground(NOTIFICATION_ID, buildNotification())
-        val state = connectionManager.state.value
-        if (state.host == null || state.phase == ConnectionPhase.DISCONNECTED) {
+        // The tiny journal is loaded by the manager's constructor. A persisted exhausted budget
+        // must not attempt startForeground again even if we died between onTimeout and stopSelf.
+        if (connectionManager.backgroundServiceTimeLimitReached()) {
             stopSelf()
             return START_NOT_STICKY
         }
-        connectionManager.recoverIfNeeded()
+        // This also applies to a null sticky-restart Intent: never wait for DataStore before FGS.
+        notifications.ensureChannels()
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        } catch (failure: IllegalStateException) {
+            connectionManager.onBackgroundServiceStartRestricted()
+            stopSelf()
+            return START_NOT_STICKY
+        } catch (failure: SecurityException) {
+            connectionManager.onBackgroundServiceStartRestricted()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        restoreJob?.cancel()
+        restoreJob = scope.launch {
+            try {
+                if (!connectionManager.restoreBackgroundConnection(serviceAlreadyStarted = true)) {
+                    stopSelfResult(startId)
+                } else {
+                    // Keep a cold restore/reconnect notification honest as readiness changes.
+                    connectionManager.state.map { it.phase to it.host }.distinctUntilChanged().collect {
+                        getSystemService(android.app.NotificationManager::class.java)
+                            .notify(NOTIFICATION_ID, buildNotification())
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w("ConnectionService", "Background recovery unavailable", failure)
+                stopSelfResult(startId)
+            }
+        }
         return START_STICKY
     }
 
@@ -53,22 +96,26 @@ class ConnectionService : Service() {
 
     override fun onDestroy() {
         // The service dying does not tear the connection down; the manager owns it.
+        scope.cancel()
+        connectionManager.onBackgroundServiceDestroyed()
         super.onDestroy()
     }
 
     private fun buildNotification(): Notification {
-        val host = connectionManager.state.value.host
+        val state = connectionManager.state.value
+        val host = state.host
         val openIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val text = host?.let { getString(R.string.notif_connected_text, it.authority) }
-            ?: getString(R.string.common_connected)
+        val text = if (state.phase == ConnectionPhase.CONNECTED && host != null) {
+            getString(R.string.notif_connected_text, host.authority)
+        } else getString(R.string.common_reconnecting)
         return NotificationCompat.Builder(this, DshNotifications.CHANNEL_CONNECTION)
             .setSmallIcon(R.drawable.ic_notification_whale)
-            .setContentTitle(getString(R.string.notif_connected_title))
+            .setContentTitle(getString(if (state.phase == ConnectionPhase.CONNECTED) R.string.notif_connected_title else R.string.notif_channel_connection))
             .setContentText(text)
             .setContentIntent(openIntent)
             .setOngoing(true)
