@@ -12,12 +12,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,25 +64,108 @@ internal fun TrajectoryTab(
     loadingOlder: Boolean = false,
     loadOlderFailed: Boolean = false,
     onLoadOlder: () -> Unit = {},
+    loadingNewer: Boolean = false,
+    loadNewerFailed: Boolean = false,
+    onLoadNewer: () -> Unit = {},
+    onHistoryViewport: (anchorSeq: Long?, atTail: Boolean) -> Unit = { _, _ -> },
+    historyInteractionEnabled: Boolean = true,
+    viewportRestore: HistoryViewportRestoreRequest? = null,
+    onViewportRestored: (Long) -> Unit = {},
 ) {
     val colors = DsTheme.colors
-    val nodes = remember(conversation?.journal, conversation?.nodes) {
-        if (conversation?.journal.isNullOrEmpty()) conversation?.nodes.orEmpty()
-        else com.labteto.dshmobile.core.session.EventFold(conversation!!.sessionId).fold(
-            conversation.journal.map { it.copy(surfaceOp = null, surfaceIntent = null) },
-        ).nodes
-    }
+    val nodes = conversation?.nodes.orEmpty()
     // Structural markers are dropped before grouping, not just drawn as nothing: an empty row
     // still costs the list's spacing, and a turn of tool calls would gain a gap around each one.
-    var rawOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    val groups = remember(nodes) {
-        groupByTurn(nodes.filterNot { it is com.labteto.dshmobile.core.session.OtherNode && it.type in STRUCTURAL_EVENT_TYPES })
-            .map { (turn, turnNodes) -> LedgerTurn(turn, turnNodes, ledgerRows(turnNodes)) }
+    var rawOpen by androidx.compose.runtime.saveable.rememberSaveable(conversation?.sessionId) { mutableStateOf(false) }
+    val groups = remember(nodes, conversation?.running) {
+        groupLedgerTurns(nodes.filterNot { it is com.labteto.dshmobile.core.session.OtherNode && it.type in STRUCTURAL_EVENT_TYPES })
+            .map { (turn, turnNodes) -> LedgerTurn(turn, turnNodes, ledgerRows(renderableChatNodes(turnNodes, conversation?.running == true))) }
+            .filter { it.rows.isNotEmpty() }
     }
 
+    val hasNewer = conversation?.hasNewer == true
+    val firstSeq = conversation?.journal?.firstOrNull()?.seq ?: nodes.firstOrNull()?.seq
+    val lastSeq = conversation?.journal?.lastOrNull()?.seq ?: nodes.lastOrNull()?.seq
+    val reportViewport by rememberUpdatedState(onHistoryViewport)
+    LaunchedEffect(listState, conversation?.sessionId, hasNewer, firstSeq, lastSeq, historyInteractionEnabled) {
+        if (!historyInteractionEnabled) return@LaunchedEffect
+        var lastAnchor: Long? = null
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val visible = info.visibleItemsInfo
+            if (visible.isEmpty()) null else {
+                val anchor = visible.firstNotNullOfOrNull { item ->
+                    val key = item.key as? String
+                    when {
+                        key?.startsWith("n-") == true -> key.removePrefix("n-").toLongOrNull()
+                        key?.startsWith("raw-") == true -> key.removePrefix("raw-").toLongOrNull()
+                        else -> null
+                    }
+                }
+                Triple(anchor, !hasNewer && !listState.canScrollForward, visible.first().index <= 1)
+            }
+        }.collect { viewport ->
+            if (viewport == null) return@collect
+            // Totals/disclosure headers have no event key. Keep the last real reading anchor,
+            // or the corresponding loaded edge when this view first opens on metadata alone.
+            val anchor = viewport.first ?: lastAnchor ?: if (viewport.third) firstSeq else lastSeq
+            lastAnchor = anchor
+            reportViewport(anchor, viewport.second)
+        }
+    }
+
+    LaunchedEffect(viewportRestore, groups, hasNewer, conversation?.hasMore, firstSeq, lastSeq, rawOpen) {
+        val request = viewportRestore ?: return@LaunchedEffect
+        if ((request.position.rawExpanded || ((request.position.key as? String)?.startsWith("raw-") == true && request.position.key != "raw-header")) && !rawOpen) {
+            rawOpen = true
+            return@LaunchedEffect
+        }
+        val keys: List<Any> = buildList {
+            if (conversation?.hasMore == true) add("load-older")
+            if (groups.isEmpty()) add("empty")
+            groups.forEach { group ->
+                add("turn-${group.turn}")
+                addAll(group.rows.map { "n-${it.seq}" })
+            }
+            if (hasNewer) add("load-newer")
+            if (stats != null || usage != null) add("totals")
+            if (!conversation?.journal.isNullOrEmpty()) {
+                add("raw-header")
+                if (rawOpen) addAll(conversation!!.journal.map { "raw-${it.seq}" })
+            }
+        }
+        if (!historyRestoreWindowReady(conversation, keys, request)) return@LaunchedEffect
+        val position = request.position.copy(atTail = request.position.atTail && !hasNewer)
+        val index = historyRestoreIndex(keys, position, reverseLayout = false)
+        if (index != null) listState.scrollToItem(index, if (position.atTail) 0 else position.scrollOffset)
+        onViewportRestored(request.token)
+    }
+
+    val canPageEarlier by rememberUpdatedState(historyInteractionEnabled && viewportRestore == null &&
+        conversation?.hasMore == true && !loadingOlder && !loadOlderFailed)
+    val requestEarlier by rememberUpdatedState(onLoadOlder)
+    val gestureGate = remember(conversation?.sessionId) { ReaderPagingGesture() }
+    val userScroll = remember(listState, conversation?.sessionId) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput &&
+                    gestureGate.request(consumed.y + available.y,
+                        listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index?.let { it <= 2 } == true,
+                        canPageEarlier)) requestEarlier()
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity,
+                available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                gestureGate.endGesture()
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().nestedScroll(userScroll),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -102,7 +189,7 @@ internal fun TrajectoryTab(
         groups.forEach { (turn, turnNodes, rows) ->
             item(key = "turn-$turn") {
                 SectionHeader(
-                    title = stringResource(R.string.trajectory_turn, turn),
+                    title = if (turn != null) stringResource(R.string.trajectory_turn, turn) else stringResource(R.string.trajectory_ledger),
                     action = turnNodes.count { it is ToolCallNode }.let { pluralStringResource(R.plurals.trajectory_step_count, it, it) },
                 )
             }
@@ -111,10 +198,15 @@ internal fun TrajectoryTab(
                 key = { index -> "n-${rows[index].seq}" },
             ) { index ->
                 when (val row = rows[index]) {
-                    is LedgerRow.Node -> TrajectoryRow(row.node, turnNodes, cwd)
+                    is LedgerRow.Node -> TrajectoryRow(row.node, turnNodes, cwd, conversation?.running == true, hasNewer)
                     is LedgerRow.Context -> ContextGroupRow(row.nodes, ChatNodeContext(turnNodes, false, cwd,
-                        onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> }))
+                        onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> }, hasNewer = hasNewer))
                 }
+            }
+        }
+        if (hasNewer) {
+            item(key = "load-newer") {
+                LoadNewerRow(loading = loadingNewer, failed = loadNewerFailed, onRetry = onLoadNewer)
             }
         }
         if (stats != null || usage != null) {
@@ -166,7 +258,7 @@ private fun isHarnessContext(node: ChatNode): Boolean =
         (node is com.labteto.dshmobile.core.session.OtherNode && node.type in setOf("system/message", "request/context"))
 
 /** One turn of the ledger: its nodes, and the rows drawn for them. */
-private data class LedgerTurn(val turn: Int, val nodes: List<ChatNode>, val rows: List<LedgerRow>)
+private data class LedgerTurn(val turn: Int?, val nodes: List<ChatNode>, val rows: List<LedgerRow>)
 
 /** A ledger row: one node, or a run of harness context drawn as Chat draws it. */
 private sealed interface LedgerRow {
@@ -186,85 +278,9 @@ private fun ledgerRows(nodes: List<ChatNode>): List<LedgerRow> {
 }
 
 @Composable
-private fun TrajectoryRow(node: ChatNode, siblings: List<ChatNode>, cwd: String?) {
-    val colors = DsTheme.colors
-    when (node) {
-        is UserMessageNode -> {
-            val preview = node.previewText.trim()
-            if (preview.isNotEmpty()) {
-                Text("> $preview", style = DsType.caption11, color = colors.labelSecondary)
-            }
-        }
-        is AssistantMessageNode -> {
-            val snippet = node.plainText.trim().take(160)
-            if (snippet.isNotEmpty()) {
-                Text(
-                    snippet,
-                    style = DsType.caption11,
-                    color = colors.labelTertiary,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        is ToolCallNode -> {
-            val result = siblings
-                .filterIsInstance<ToolResultNode>()
-                .firstOrNull { it.callId == node.callId }
-            ToolLedgerRow(node, result, cwd)
-        }
-        // Step boundaries are already counted in the turn header; as rows they put a
-        // `step/start` and a `step/end` around every tool call in the ledger. The changes marker
-        // reads as the turn's changed files, as it does in Chat.
-        is com.labteto.dshmobile.core.session.OtherNode -> when {
-            node.type in STRUCTURAL_EVENT_TYPES -> Unit
-            node.type == "workspace/changes" && changesTurn(node.data) != null ->
-                ChangedFilesRow(siblings, changesTurn(node.data)!!, cwd)
-            else -> JsonDisclosure(node.type, node.data)
-        }
-        else -> Unit
-    }
-}
-
-@Composable
-private fun ToolLedgerRow(call: ToolCallNode, result: ToolResultNode?, cwd: String?) {
-    val colors = DsTheme.colors
-    val row = remember(call.callId, cwd) { toolRowModel(call.name, call.arguments, cwd) }
-    var expanded by remember(call.callId) { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        StateDot(
-            when {
-                result == null -> StateDotState.Running
-                result.isError -> StateDotState.Error
-                else -> StateDotState.Done
-            },
-            size = 8.dp,
-        )
-        Spacer(Modifier.width(6.dp))
-        DisclosureRow(
-            title = row.title,
-            summary = row.summary,
-            // The ledger already leads with its own state dot, so the slot keeps the glyph.
-            icon = row.variant.featherIcon(),
-            expanded = expanded,
-            onToggle = { expanded = !expanded },
-            modifier = Modifier.weight(1f),
-        ) {
-            Column(Modifier.padding(start = 28.dp, top = 2.dp)) {
-                Text(stringResource(R.string.chat_input_placeholder), style = DsType.caption11, color = colors.labelCaption)
-                JsonDisclosure(call.name, runCatching { kotlinx.serialization.json.Json.parseToJsonElement(call.arguments) }.getOrElse { kotlinx.serialization.json.JsonPrimitive(call.arguments) })
-                result?.content?.let { content ->
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.chat_output_placeholder), style = DsType.caption11, color = colors.labelCaption)
-                    Text(
-                        content.toString(),
-                        style = MonoCaption,
-                        color = if (result.isError) colors.error else colors.labelTertiary,
-                    )
-                }
-            }
-        }
-    }
+private fun TrajectoryRow(node: ChatNode, siblings: List<ChatNode>, cwd: String?, running: Boolean, hasNewer: Boolean) {
+    ChatNodeItem(node, ChatNodeContext(siblings, running, cwd,
+        onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> }, hasNewer = hasNewer))
 }
 
 @Composable

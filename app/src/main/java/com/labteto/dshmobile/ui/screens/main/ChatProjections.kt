@@ -37,7 +37,11 @@ internal fun parseGoal(element: JsonElement?): GoalSnapshot? {
 }
 
 /** One to-do entry as the dock renders it. */
-internal data class TodoEntry(val content: String, val status: String)
+internal data class TodoEntry(val content: String, val status: String = "pending")
+
+/** Canonical task schema: content + pending/in_progress/completed; absent/unknown is pending. */
+internal fun readerTaskStatus(status: String?): String =
+    status?.takeIf { it in setOf("pending", "in_progress", "completed") } ?: "pending"
 
 /** The todo list, whether it arrived bare or wrapped in a `{ todos: [...] }` envelope. */
 internal fun parseTodos(element: JsonElement?): List<TodoEntry>? {
@@ -48,7 +52,7 @@ internal fun parseTodos(element: JsonElement?): List<TodoEntry>? {
         array.mapNotNull { entry ->
             val row = entry as? JsonObject ?: return@mapNotNull null
             val content = row["content"].asString() ?: return@mapNotNull null
-            TodoEntry(content = content, status = row["status"].asString() ?: "pending")
+            TodoEntry(content = content, status = readerTaskStatus(row["status"].asString()))
         }
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 }

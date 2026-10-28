@@ -60,14 +60,20 @@ internal fun AssistantMessageNode.showsToolPreview(
     block.toolCallId !in knownToolCallIds
 
 internal fun renderableChatNodes(nodes: List<ChatNode>, running: Boolean): List<ChatNode> {
-    val knownToolCallIds = nodes.filterIsInstance<ToolCallNode>().mapTo(mutableSetOf()) { it.callId }
+    val cut = RewindCuts.hiddenSeqs(nodes)
+    val knownToolCallIds = nodes.filterIsInstance<ToolCallNode>().filter { it.seq !in cut }.mapTo(mutableSetOf()) { it.callId }
     // What a rewind withdrew. The harness still serves those events; the browser hides them from
     // the command ledger, and so does this. The marker the rewind appended stays, drawn as a
     // divider rather than an empty user bubble.
-    val cut = RewindCuts.hiddenSeqs(nodes)
     return nodes.filter { node ->
         node.seq !in cut && ((node is UserMessageNode && node.isRewindMarker) || node.rendersContent(running, knownToolCallIds))
     }
+}
+
+/** Raw/child lists call ChatNodeItem directly rather than going through the transcript filter. */
+internal fun ToolResultNode.isOrphanResult(nodes: List<ChatNode>): Boolean {
+    val cut = RewindCuts.hiddenSeqs(nodes)
+    return seq !in cut && nodes.none { it is ToolCallNode && it.seq !in cut && it.callId == callId }
 }
 
 /** The `(empty message)` row `dsh-rewind` appends to mark where the conversation was cut back to. */
@@ -79,16 +85,16 @@ internal fun ChatNode.rendersContent(
 ): Boolean = when (this) {
     // Structure, not content.
     is TurnStartNode -> false
-    // Rendered inside the matching call's card.
-    is ToolResultNode -> false
+    // A byte-bounded page can contain the result without its call. Keep its real output accessible.
+    is ToolResultNode -> callId !in knownToolCallIds
     // Only an unclean ending says anything; a completed turn is the frame. Kinds [ChatNodeItem]
     // draws nothing for (harness 0.1.7's `forked`, or one this build has never seen) cost a gap.
     is TurnEndNode -> reasonKind in DRAWN_TURN_END_KINDS
     // Bookkeeping event types are not "unknown" — they are noise between the tool calls.
-    is OtherNode -> type !in STRUCTURAL_EVENT_TYPES
+    is OtherNode -> type == "deliverables/presented"
 
     // Content that can still fold to nothing.
-    is UserMessageNode -> blocks.any { it.kind == "image" } || displayText().isNotBlank()
+    is UserMessageNode -> !isInjectedContext && (blocks.any { it.kind in setOf("image", "file") } || displayText().isNotBlank())
     is AssistantMessageNode -> interrupted || blocks.any { block ->
         when (block.kind) {
             // Before the durable call arrives, the provisional block is the argument preview.
@@ -96,26 +102,26 @@ internal fun ChatNode.rendersContent(
             "tool-result" -> false
             "text" -> !block.text.isNullOrBlank()
             // A settled empty block is nothing; a live one is the Thinking row before its first token.
-            "reasoning" -> !block.text.isNullOrBlank() || (streaming && running && !interrupted)
-            "image" -> true
-            else -> block.text != null
+            "reasoning" -> false
+            "image", "file" -> true
+            else -> false
         }
     }
-    is TodoNode -> parseTodos(todos) != null
-    is GoalNode -> parseGoal(data) != null
-    is WorkflowNode -> data is JsonObject
-    is DeveloperMessageNode -> addedTools.isNotEmpty() || removedTools.isNotEmpty()
+    is TodoNode -> false
+    is GoalNode -> false
+    is WorkflowNode -> false
+    is DeveloperMessageNode -> false
 
     // Always draws.
     is ToolCallNode -> true
-    is PlanModeNode -> true
-    is CompactionNode -> true
+    is PlanModeNode -> false
+    is CompactionNode -> false
     is RetryNode -> true
     is TurnErrorNode -> true
-    is CommandNode -> true
+    is CommandNode -> false
     // Session naming is already reflected in the top bar, not an assistant reply.
     is TitleNode -> false
-    is SubagentNode -> true
+    is SubagentNode -> false
 }
 
 /** The `turn/end` reasons [ChatNodeItem] draws something for. */

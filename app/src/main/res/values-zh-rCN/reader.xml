@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reader_tool_result">工具结果</string>
+    <string name="reader_tool_running">运行中</string>
+    <string name="reader_tool_done">已完成</string>
+    <string name="reader_tool_error">出错</string>
+    <string name="reader_tool_unknown">状态未知</string>
+    <string name="reader_task_pending">待处理</string>
+    <string name="reader_task_running">进行中</string>
+    <string name="reader_task_done">已完成</string>
+    <string name="reader_image_reference">图片附件</string>
+    <string name="reader_image_preview">点击加载预览</string>
+</resources>

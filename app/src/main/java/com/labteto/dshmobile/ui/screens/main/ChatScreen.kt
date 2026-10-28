@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -111,6 +112,8 @@ fun ChatScreen(
     val connectionError by store.connectionError.collectAsStateWithLifecycle()
     val loadingOlder by store.loadingOlder.collectAsStateWithLifecycle()
     val loadOlderFailed by store.loadOlderFailed.collectAsStateWithLifecycle()
+    val loadingNewer by store.loadingNewer.collectAsStateWithLifecycle()
+    val loadNewerFailed by store.loadNewerFailed.collectAsStateWithLifecycle()
     val pendingApproval by store.pendingApproval.collectAsStateWithLifecycle()
     val pendingQuestions by store.pendingQuestions.collectAsStateWithLifecycle()
     val permissions by store.permissions.collectAsStateWithLifecycle()
@@ -140,10 +143,9 @@ fun ChatScreen(
     var tab by rememberSaveable { mutableStateOf(ChatTab.Chat) }
     val chatPreferences = remember(context) { context.getSharedPreferences("chat_ui", android.content.Context.MODE_PRIVATE) }
     var zenMode by rememberSaveable { mutableStateOf(chatPreferences.getBoolean("zen_mode", false)) }
-    fun setZen(enabled: Boolean) {
-        zenMode = enabled
-        chatPreferences.edit().putBoolean("zen_mode", enabled).apply()
-    }
+    // AnimatedContent keeps the outgoing view alive during its transition. Long-lived viewport
+    // collectors must read the current effective tab, not the tab captured when they launched.
+    val activeHistoryTab by rememberUpdatedState(if (zenMode) ChatTab.Chat else tab)
     val attachments = composer.attachments
 
     var panelKey by remember { mutableStateOf<ComposerKey?>(null) }
@@ -170,6 +172,117 @@ fun ChatScreen(
     // Hoisted above the tab swap so each view keeps its own scroll position across switches.
     val chatListState = rememberLazyListState()
     val trajectoryListState = rememberLazyListState()
+    val historyReading = remember(hostKey, currentSessionId) { HistoryReadingState() }
+    val currentHistoryReading by rememberUpdatedState(historyReading)
+    var historySeekJob by remember(historyReading) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var historySeeking by remember(historyReading) { mutableStateOf(false) }
+    var historyFailedEntry by remember(historyReading) { mutableStateOf<HistoryEntry?>(null) }
+    val turnOutline = conversation?.projections?.get("turnOutline")
+    val hasTurnOutline = remember(turnOutline) { parseTurnOutline(turnOutline) != null }
+    val historyDirectory = if (sheet == ChatSheet.History) {
+        remember(conversation?.nodes, conversation?.running, eventTimes, turnOutline) {
+            historyEntries(conversation?.nodes.orEmpty(), conversation?.running == true, eventTimes, turnOutline)
+        }
+    } else emptyList()
+    androidx.compose.runtime.DisposableEffect(historyReading) {
+        onDispose { historySeekJob?.cancel() }
+    }
+    val historyInteractionAllowed by rememberUpdatedState(sheet != ChatSheet.History && !historyReading.restoring)
+
+    fun captureReading(view: ChatTab): HistoryViewBookmark? {
+        if (historyReading !== currentHistoryReading) return null
+        val state = if (view == ChatTab.Chat) chatListState else trajectoryListState
+        val current = store.currentConversation.value
+        val streamingSeq = current?.nodes?.filterIsInstance<com.labteto.dshmobile.core.session.AssistantMessageNode>()
+            ?.lastOrNull { it.streaming }?.seq
+        val position = captureHistoryReadingPosition(state, view == ChatTab.Chat, current?.hasNewer == true, streamingSeq)
+        store.updateHistoryViewport(position.anchorSeq, position.atTail)
+        val window = store.captureHistoryViewport() ?: return null
+        historyReading.rendered[view] = HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing)
+        return HistoryViewBookmark(view, window, position).also { historyReading.views[view] = it }
+    }
+
+    fun switchHistoryView(target: ChatTab, activate: () -> Unit) {
+        if (historyReading !== currentHistoryReading || historyReading.restoring || sheet == ChatSheet.History) return
+        if (target == activeHistoryTab) { activate(); return }
+        captureReading(activeHistoryTab)
+        val bookmark = historyReading.views[target]
+        if (bookmark == null) { activate(); return }
+        historyReading.restoring = true
+        scope.launch {
+            val restored = store.restoreHistoryViewport(bookmark.window)
+            if (historyReading !== currentHistoryReading) return@launch
+            if (restored) historyReading.request(target, bookmark.position, store.currentConversation.value)
+            else { historyReading.views.remove(target); historyReading.cancelRestore() }
+            activate()
+        }
+    }
+
+    fun setZen(enabled: Boolean) {
+        val target = if (enabled) ChatTab.Chat else tab
+        switchHistoryView(target) {
+            zenMode = enabled
+            chatPreferences.edit().putBoolean("zen_mode", enabled).apply()
+        }
+    }
+
+    fun openHistory() {
+        if (historyReading !== currentHistoryReading || historyReading.restoring || sheet == ChatSheet.History) return
+        historyReading.sheetBookmark = captureReading(activeHistoryTab)
+        historyFailedEntry = null
+        sheet = ChatSheet.History
+    }
+
+    fun dismissHistory(after: () -> Unit = {}) {
+        if (historyReading !== currentHistoryReading || historyReading.restoring) return
+        val cancelledSeek = historySeekJob
+        cancelledSeek?.cancel()
+        val bookmark = historyReading.sheetBookmark
+        historyReading.restoring = true
+        scope.launch {
+            cancelledSeek?.join()
+            if (historyReading !== currentHistoryReading) return@launch
+            if (bookmark == null) {
+                historyReading.cancelRestore(); sheet = null; after(); return@launch
+            }
+            val restored = store.restoreHistoryViewport(bookmark.window)
+            if (historyReading !== currentHistoryReading) return@launch
+            val finish = { historyReading.sheetBookmark = null; sheet = null; after() }
+            if (restored) historyReading.request(bookmark.view, bookmark.position, store.currentConversation.value, finish)
+            else { historyReading.cancelRestore(); finish() }
+        }
+    }
+
+    fun pickHistory(entry: HistoryEntry) {
+        if (historyReading !== currentHistoryReading || historyReading.restoring || historySeeking) return
+        historySeeking = true
+        historyFailedEntry = null
+        historySeekJob = scope.launch {
+            try {
+                val loaded = store.seekHistoryTurn(entry.targetStartSeq ?: entry.seq)
+                if (historyReading !== currentHistoryReading || sheet != ChatSheet.History) return@launch
+                val current = store.currentConversation.value
+                val target = if (loaded && current != null && current.sessionId == currentSessionId) {
+                    historyJumpTarget(entry, current.nodes, current.running, current.projections["turnOutline"])
+                } else null
+                if (target == null) {
+                    historyFailedEntry = entry
+                    return@launch
+                }
+                store.updateHistoryViewport(target, false)
+                historyReading.sheetBookmark = null
+                pendingJumpSeq = target
+                sheet = null
+                tab = ChatTab.Chat
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (historyReading === currentHistoryReading) historyFailedEntry = entry
+            } finally {
+                historySeeking = false
+            }
+        }
+    }
 
     val commandFailed = stringResource(R.string.err_command_failed)
     val unknownCommand = stringResource(R.string.err_command_unknown)
@@ -493,14 +606,14 @@ fun ChatScreen(
                 tab = tab,
                 onOpenDrawer = onOpenDrawer,
                 onOpenModels = { sheet = ChatSheet.Models },
-                onOpenHistory = { sheet = ChatSheet.History },
+                onOpenHistory = { openHistory() },
                 onOpenPresets = {
                     scope.launch { store.refreshAgentPresets() }
                     sheet = ChatSheet.Presets
                 },
                 onOpenSubagents = { sheet = ChatSheet.Subagents },
                 onOpenDetails = onOpenDetails,
-                onTabChange = { tab = it },
+                onTabChange = { target -> switchHistoryView(target) { tab = target } },
                 onOpenWorkspace = { panelKey = composer.key },
                 workspaceEnabled = currentSessionId != null,
                 historyEnabled = currentSessionId != null,
@@ -515,18 +628,12 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
-            if (!zenMode) {
-                AnimatedPresence(connectionError) {
-                    ConnectionBanner(
-                        message = it,
-                        actionLabel = stringResource(R.string.common_retry),
-                        onAction = { store.retryConnection() },
-                    )
-                }
-                AnimatedPresence(Unit.takeIf { conversation?.gap == true && connectionError == null && !historySyncing }) {
-                    ConnectionBanner(stringResource(R.string.common_reconnecting), warning = true)
-                }
-            }
+            if (!zenMode) ChatConnectionNotices(
+                connection = connection,
+                operationError = connectionError,
+                historyGap = conversation?.gap == true && !historySyncing,
+                onRetry = { store.retryConnection() },
+            )
 
             val nodeContext = ChatNodeContext(
                 nodes = conversation?.nodes ?: emptyList(),
@@ -565,7 +672,7 @@ fun ChatScreen(
                 val composerMaxHeight = (maxHeight * 0.6f).coerceAtLeast(180.dp)
                 Column(Modifier.fillMaxSize()) {
                 AnimatedContent(
-                    targetState = if (zenMode) ChatTab.Chat else tab,
+                    targetState = activeHistoryTab,
                     transitionSpec = {
                         val forward = targetState.ordinal > initialState.ordinal
                         (
@@ -577,18 +684,41 @@ fun ChatScreen(
                     modifier = Modifier.weight(1f),
                     label = "chatTab",
                 ) { current ->
+                    val request = if (current == ChatTab.Chat) historyReading.chatRestore else historyReading.trajectoryRestore
+                    val retained = historyReading.rendered[current]
+                    val requestReady = request != null && historyRestoreWindowReady(conversation, emptyList(), request)
+                    val coveredOrOutgoing = current != activeHistoryTab ||
+                        ((sheet == ChatSheet.History || historyReading.restoring) && !requestReady)
+                    val pane = if (coveredOrOutgoing && retained != null) retained else
+                        HistoryPaneSnapshot(conversation, sessionStats, tokenUsage, workingDirectory, !historySyncing)
+                    val paneTimes = remember(pane.conversation?.journal) {
+                        pane.conversation?.journal?.associate { it.seq to it.time }.orEmpty()
+                    }
+                    val paneContext = nodeContext.copy(nodes = pane.conversation?.nodes.orEmpty(),
+                        running = pane.conversation?.running == true, historyReady = pane.historyReady,
+                        eventTimes = paneTimes, cwd = pane.cwd)
                     when (current) {
                         ChatTab.Chat -> ChatTranscript(
-                            conversation = conversation,
-                            loading = conversation == null && currentSessionId != null,
+                            conversation = pane.conversation,
+                            loading = pane.conversation == null && currentSessionId != null,
                             loadingOlder = loadingOlder,
                             loadOlderFailed = loadOlderFailed,
-                            context = nodeContext,
+                            context = paneContext,
                             listState = chatListState,
-                            onLoadOlder = { scope.launch { store.loadOlder() } },
+                            onLoadOlder = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) scope.launch { store.loadOlder() } },
                             jumpToSeq = pendingJumpSeq,
                             onJumpConsumed = { pendingJumpSeq = null },
                             sentTick = sentTick,
+                            loadingNewer = loadingNewer,
+                            loadNewerFailed = loadNewerFailed,
+                            onLoadNewer = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) scope.launch { store.loadNewer() } },
+                            onShowLatest = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) store.showLatestHistory() else false },
+                            onHistoryViewport = { anchor, atTail ->
+                                if (historyInteractionAllowed && activeHistoryTab == ChatTab.Chat) store.updateHistoryViewport(anchor, atTail)
+                            },
+                            historyInteractionEnabled = historyInteractionAllowed && activeHistoryTab == ChatTab.Chat,
+                            viewportRestore = if (requestReady) request else null,
+                            onViewportRestored = { token -> if (historyReading === currentHistoryReading) historyReading.consumed(token) },
                             showStatusNotices = !zenMode,
                             onSuggestion = if (currentSessionId != null) {
                                 { text -> draft = text; composer.selection = text.length }
@@ -597,19 +727,29 @@ fun ChatScreen(
                             },
                         )
                         ChatTab.Trajectory -> TrajectoryTab(
-                            conversation = conversation,
-                            stats = sessionStats,
-                            usage = tokenUsage,
-                            cwd = workingDirectory,
+                            conversation = pane.conversation,
+                            stats = pane.stats,
+                            usage = pane.usage,
+                            cwd = pane.cwd,
                             listState = trajectoryListState,
                             loadingOlder = loadingOlder,
                             loadOlderFailed = loadOlderFailed,
-                            onLoadOlder = { scope.launch { store.loadOlder() } },
+                            onLoadOlder = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory) scope.launch { store.loadOlder() } },
+                            loadingNewer = loadingNewer,
+                            loadNewerFailed = loadNewerFailed,
+                            onLoadNewer = { if (historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory) scope.launch { store.loadNewer() } },
+                            onHistoryViewport = { anchor, atTail ->
+                                if (historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory) store.updateHistoryViewport(anchor, atTail)
+                            },
+                            historyInteractionEnabled = historyInteractionAllowed && activeHistoryTab == ChatTab.Trajectory,
+                            viewportRestore = if (requestReady) request else null,
+                            onViewportRestored = { token -> if (historyReading === currentHistoryReading) historyReading.consumed(token) },
                         )
                     }
                 }
 
-                conversation?.takeUnless { zenMode }?.let { conv ->
+                // Current tasks/goals are reader content, not diagnostics: retain them in Zen.
+                conversation?.let { conv ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -620,7 +760,7 @@ fun ChatScreen(
                         // transcript up rather than shoving it by a whole row in a single frame.
                         AnimatedPresence(parseTodos(conv.projections["todos"])?.takeIf { it.isNotEmpty() }) { TodoDock(it) }
                         AnimatedPresence(parseGoal(conv.projections["goal"])) { GoalBar(it, store) }
-                        AnimatedPresence(conv.queue.takeIf { it.isNotEmpty() }) { QueueDock(it, store) }
+                        if (!zenMode) AnimatedPresence(conv.queue.takeIf { it.isNotEmpty() }) { QueueDock(it, store) }
                     }
                 }
 
@@ -778,7 +918,7 @@ fun ChatScreen(
                                 ZenAction(R.string.chat_zen_exit) { setZen(false) },
                                 ZenAction(R.string.chatlist_open, run = onOpenDrawer),
                                 ZenAction(R.string.models_title) { sheet = ChatSheet.Models },
-                                ZenAction(R.string.chat_history_title, currentSessionId != null) { sheet = ChatSheet.History },
+                                ZenAction(R.string.chat_history_title, currentSessionId != null) { openHistory() },
                                 ZenAction(R.string.panel_workspace, currentSessionId != null) { panelKey = composer.key },
                                 ZenAction(R.string.chat_details_title, run = onOpenDetails),
                                 ZenAction(R.string.chat_composer_commands, currentSessionId != null) { sheet = ChatSheet.Commands },
@@ -882,25 +1022,21 @@ fun ChatScreen(
         )
         ChatSheet.Models -> ModelsSheet(models = models, store = store, onDismiss = { sheet = null })
         ChatSheet.History -> HistorySheet(
-            entries = remember(conversation?.nodes, conversation?.running, eventTimes) {
-                historyEntries(
-                    nodes = conversation?.nodes.orEmpty(),
-                    running = conversation?.running == true,
-                    eventTimes = eventTimes,
-                )
-            },
-            hasMore = conversation?.hasMore == true,
+            entries = historyDirectory,
+            hasMore = !hasTurnOutline && conversation?.hasMore == true,
             loadingOlder = loadingOlder,
             loadOlderFailed = loadOlderFailed,
-            onLoadOlder = { scope.launch { store.loadOlder() } },
-            onPick = { seq ->
-                // Closing first: the scroll happens on the transcript's next composition, and
-                // leaving the sheet over it would hide the very message the pick was for.
-                pendingJumpSeq = seq
-                sheet = null
-                tab = ChatTab.Chat
-            },
-            onDismiss = { sheet = null },
+            onLoadOlder = { if (!historyReading.restoring && !historySeeking) scope.launch { store.loadOlder() } },
+            hasNewer = !hasTurnOutline && conversation?.hasNewer == true,
+            loadingNewer = loadingNewer,
+            loadNewerFailed = loadNewerFailed,
+            onLoadNewer = { if (!historyReading.restoring && !historySeeking) scope.launch { store.loadNewer() } },
+            seeking = historySeeking,
+            seekFailed = historyFailedEntry != null,
+            onRetrySeek = { historyFailedEntry?.let { pickHistory(it) } },
+            onPick = { seq -> historyDirectory.firstOrNull { it.seq == seq }?.let { pickHistory(it) } },
+            onDismiss = { dismissHistory() },
+            onDismissThen = { after -> dismissHistory(after) },
             onEdit = if (currentSessionId != null) ({ text -> editPrompt(text) }) else null,
         )
         ChatSheet.Presets -> PresetsSheet(

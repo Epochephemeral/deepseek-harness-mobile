@@ -113,6 +113,8 @@ internal data class ChatNodeContext(
     val onRewindTo: ((Long, String) -> Unit)? = null,
     /** Adds an `@` mention of a workspace path to the composer; null where there is no composer. */
     val onMention: ((path: String, folder: Boolean) -> Unit)? = null,
+    /** Absence of a result in a historical partial window is not evidence of a running call. */
+    val hasNewer: Boolean = false,
 )
 
 /**
@@ -123,6 +125,8 @@ internal data class ChatNodeContext(
 @Composable
 internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
     val colors = DsTheme.colors
+    if (node !is ToolResultNode && !node.rendersContent(context.running, emptySet()) &&
+        !(node is UserMessageNode && node.isRewindMarker)) return
     when (node) {
         // Turn boundaries are structure, not content — the transcript shows the work, not the frame.
         is TurnStartNode -> Unit
@@ -164,8 +168,15 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
 
         is ToolCallNode -> ToolCallRow(node, context)
 
-        // Rendered inside the matching ToolCallNode's card; not a standalone row.
-        is ToolResultNode -> Unit
+        // Paired results retain their existing card. Orphans expose only the real result, never a
+        // fabricated call/tool name/arguments, including in raw child lists using this dispatcher.
+        is ToolResultNode -> if (node.isOrphanResult(context.nodes)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToolStatusRow(stringResource(R.string.reader_tool_result), node, false)
+                ToolResultArtifacts(node)
+                ToolResultError(node)
+            }
+        }
 
         is TurnEndNode -> when (node.reasonKind) {
             "completed" -> Unit
@@ -174,7 +185,7 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
                 StateDot(StateDotState.Error, size = 8.dp)
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    stringResource(R.string.chat_error_turn) + node.reasonDetail?.let { " · $it" }.orEmpty(),
+                    stringResource(R.string.chat_error_turn) + node.reasonDetail?.let { toolFailureMessage(it) }?.let { " · ${it.lineSequence().firstOrNull().orEmpty().take(240)}" }.orEmpty(),
                     style = DsType.small13,
                     color = colors.error,
                 )
@@ -216,7 +227,7 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
             StateDot(StateDotState.Error, size = 8.dp)
             Spacer(Modifier.width(6.dp))
             Text(
-                stringResource(R.string.chat_error_turn) + " · " + node.message,
+                stringResource(R.string.chat_error_turn) + " · " + node.message.lineSequence().firstOrNull().orEmpty().take(240),
                 style = DsType.small13,
                 color = colors.error,
             )
@@ -267,16 +278,7 @@ internal fun ChatNodeItem(node: ChatNode, context: ChatNodeContext) {
 }
 
 /** Event types that carry no user-facing content; they frame the transcript rather than fill it. */
-internal val STRUCTURAL_EVENT_TYPES = setOf(
-    "step/start",
-    "step/end",
-    "session/end-seed",
-    "session/title-llm-request",
-    "agent/inbox/spliced",
-    "assistant/chunk",
-    // A model attempt that settled without a message (harness 0.1.3): replay data, not content.
-    "assistant/attempt",
-)
+internal val STRUCTURAL_EVENT_TYPES = com.labteto.dshmobile.core.session.STRUCTURAL_EVENT_TYPES
 
 /**
  * One stored file in a message: its display name and exact size, nothing more.
@@ -379,7 +381,8 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
     // tapping stop is the answer apparently still being written.
     val streaming = context.running && isLast && !node.interrupted
     val knownToolCallIds = remember(context.nodes) {
-        context.nodes.filterIsInstance<ToolCallNode>().mapTo(mutableSetOf()) { it.callId }
+        val cut = com.labteto.dshmobile.core.session.RewindCuts.hiddenSeqs(context.nodes)
+        context.nodes.filterIsInstance<ToolCallNode>().filter { it.seq !in cut }.mapTo(mutableSetOf()) { it.callId }
     }
     val reasoningExpanded = remember(node.seq) { mutableStateMapOf<Int, Boolean>() }
     var actionsVisible by remember(node.seq) { mutableStateOf(false) }
@@ -393,21 +396,9 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
         node.blocks.forEachIndexed { index, block ->
             when (block.kind) {
                 "text" -> if (!block.text.isNullOrBlank()) MarkdownText(block.text.orEmpty())
-                "reasoning" -> if (!block.text.isNullOrBlank() || streaming) {
-                    val expanded = reasoningExpanded[index] ?: false
-                    ThinkingPanel(
-                        text = block.text.orEmpty(),
-                        expanded = expanded,
-                        onToggle = { reasoningExpanded[index] = !expanded },
-                        streaming = streaming,
-                        content = { ReasoningContent(block.text.orEmpty(), streaming) },
-                    )
-                }
-                // Show partial arguments until the durable tool card takes over. The list filter
-                // uses this same predicate so a tool-only streaming message can reach this row.
+                "reasoning" -> Unit
                 "tool-call" -> if (node.showsToolPreview(block, context.running, knownToolCallIds)) {
-                    val progress = toolRowModel(block.toolName.orEmpty(), block.argumentsJson, context.cwd)
-                    Text(listOfNotNull(progress.title, progress.summary).joinToString(" · "), style = DsType.small13, color = colors.labelSecondary)
+                    ToolStatusRow(block.toolName.orEmpty(), null, true)
                 }
                 "tool-result" -> Unit
                 "image" -> parseImageRef(block)?.let { ref ->
@@ -419,9 +410,7 @@ private fun AssistantMessage(node: AssistantMessageNode, context: ChatNodeContex
                     )
                 }
                 "file" -> parseFileRef(block)?.let { ref -> FileChip(name = ref.name, bytes = ref.bytes) }
-                else -> block.text?.let {
-                    Text(it, style = DsType.caption11, color = colors.labelTertiary)
-                }
+                else -> Unit
             }
         }
         if (node.interrupted) {
@@ -488,100 +477,84 @@ private fun ActionIcon(
 
 @Composable
 internal fun ToolCallRow(node: ToolCallNode, context: ChatNodeContext, compact: Boolean = false) {
-    val colors = DsTheme.colors
-    val result = context.nodes
-        .filterIsInstance<ToolResultNode>()
-        .firstOrNull { it.callId == node.callId }
+    val result = context.nodes.filterIsInstance<ToolResultNode>().firstOrNull { it.callId == node.callId }
+    ToolStatusRow(node.description?.takeIf { it.isNotBlank() } ?: node.name,
+        result, result == null && context.running && !context.hasNewer)
+    result?.let { ToolResultArtifacts(it); ToolResultError(it) }
+}
 
-    val card = buildToolCardView(
-        call = node,
-        result = result,
-        running = result == null && context.running,
-        cwd = context.cwd,
-        home = context.home,
-    )
-    // The row header is derived here rather than taken from the card: only this layer knows the
-    // tool's name and the session's cwd, which is what turns an absolute path into `app\build.gradle.kts`.
-    val row = toolRowModel(
-        toolName = node.name,
-        argumentsJson = node.arguments,
-        cwd = context.cwd,
-        // Derived from the call itself now: 0.1.2 sends no presenter title to prefer over it.
-        viewTitle = null,
-    )
-    var expanded by remember(node.callId) { mutableStateOf(false) }
-    var holdOpen by remember(node.callId) { mutableStateOf(false) }
-    val holdLabel = stringResource(R.string.hold_tool_actions)
-    // The leading slot carries the outcome: a red dot for a failed call, the tool glyph otherwise.
+/** No card construction, argument parsing or raw-output serialization on the reading path. */
+@Composable
+private fun ToolStatusRow(name: String, result: ToolResultNode?, running: Boolean) {
     val state = when {
-        result?.isError == true -> DisclosureState.Error
-        result == null && context.running -> DisclosureState.Running
-        else -> DisclosureState.Idle
+        result?.isError == true -> StateDotState.Error
+        result != null -> StateDotState.Done
+        running -> StateDotState.Running
+        else -> StateDotState.Idle
     }
-    val startedAt = context.eventTimes[node.seq]
-    val endedAt = result?.let { context.eventTimes[it.seq] }
-    val elapsed = if (startedAt != null && endedAt != null) {
-        com.labteto.dshmobile.ui.components.formatDurationMs((endedAt - startedAt).coerceAtLeast(0))
-    } else null
-    if (!compact && elapsed != null) Text(elapsed, style = DsType.caption11, color = colors.labelCaption)
-    ToolCard(
-        view = card,
+    val label = stringResource(when {
+        result?.isError == true -> R.string.reader_tool_error
+        result != null -> R.string.reader_tool_done
+        running -> R.string.reader_tool_running
+        else -> R.string.reader_tool_unknown
+    })
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StateDot(state, size = 8.dp)
+        Text(name, Modifier.weight(1f), style = DsType.small13, color = DsTheme.colors.labelSecondary,
+            maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(label, style = DsType.caption11,
+            color = if (result?.isError == true) DsTheme.colors.error else DsTheme.colors.labelTertiary)
+    }
+}
+
+/** Only explicit artifact references survive; prose/metadata is never rendered as tool output. */
+@Composable
+private fun ToolResultArtifacts(result: ToolResultNode) {
+    toolResultImages(result.content).forEach { ref ->
+        ToolImageReference(ref.attachmentId, ref.name) {
+            AttachmentImage(attachmentId = ref.attachmentId, intrinsicWidth = ref.width,
+                intrinsicHeight = ref.height, contentDescription = ref.name)
+        }
+    }
+    (result.content as? JsonArray).orEmpty().forEach { value ->
+        val obj = value as? JsonObject ?: return@forEach
+        if (obj["type"].asString() == "file") {
+            parseFileRef(com.labteto.dshmobile.core.session.ChatBlock(kind = "file", raw = obj))?.let {
+                FileChip(it.name, it.bytes)
+            }
+        }
+    }
+}
+
+/** The image loader is not composed (and cannot fetch) until the reader explicitly opens it. */
+@Composable
+internal fun ToolImageReference(attachmentId: String, name: String?, preview: @Composable () -> Unit) {
+    var expanded by remember(attachmentId) { mutableStateOf(false) }
+    DisclosureRow(
+        title = name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.reader_image_reference),
+        summary = stringResource(R.string.reader_image_preview),
+        icon = FeatherIcons.Image,
         expanded = expanded,
         onToggle = { expanded = !expanded },
-        titleOverride = row.title,
-        summaryOverride = row.summary,
-        iconOverride = row.variant.featherIcon(),
-        state = state,
-        onHold = { holdOpen = true },
-        holdLabel = holdLabel,
-        header = if (compact) ({
-            Row(Modifier.fillMaxWidth().heightIn(min = 32.dp)
-                .clickableWithHold(holdLabel, onHold = { holdOpen = true }, role = Role.Button) { expanded = !expanded }
-                .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Icon(if (node.name == "read_image") FeatherIcons.Image else row.variant.featherIcon(), null, Modifier.size(14.dp), tint = colors.labelTertiary)
-                Text(row.title, style = DsType.small13, color = colors.labelSecondary)
-                Text(row.summary.orEmpty(), Modifier.weight(1f), style = DsType.caption11,
-                    color = colors.labelCaption, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (expanded && elapsed != null) Text(elapsed, style = DsType.caption11, color = colors.labelCaption)
-                Text(when (state) { DisclosureState.Error -> "!"; DisclosureState.Running -> "…"; else -> "✓" },
-                    style = DsType.caption11, color = if (state == DisclosureState.Error) colors.error else colors.labelTertiary)
-                val chevron by animateFloatAsState(if (expanded) 90f else 0f, DsAnimations.chevron, label = "toolChevron")
-                Icon(FeatherIcons.ChevronRight, null, Modifier.size(14.dp).graphicsLayer { rotationZ = chevron }, tint = colors.labelTertiary)
-            }
-        }) else null,
-    )
-    if (holdOpen) ToolHoldMenu(node, result, row.filePath, context) { holdOpen = false }
-    AnimatedVisibility(
-        visible = expanded,
-        enter = fadeIn(DsAnimations.fade) + expandVertically(DsAnimations.expand),
-        exit = fadeOut(DsAnimations.fade) + shrinkVertically(DsAnimations.expand),
-    ) { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // What the call returned, not the file as it is now: the durable attachment survives the
-        // file changing or being deleted, and shares the transcript's decoded-image cache.
-        val images = remember(result?.content) { toolResultImages(result?.content) }
-        images.forEach { ref ->
-            AttachmentImage(
-                attachmentId = ref.attachmentId,
-                intrinsicWidth = ref.width,
-                intrinsicHeight = ref.height,
-                contentDescription = ref.name,
-            )
-        }
-        result?.content?.let { JsonDisclosure(stringResource(R.string.chat_output_placeholder), it) }
-        result?.meta?.let { JsonDisclosure(node.name, it) }
-        PtcChildren(node.callId, context.nodes.filterIsInstance<OtherNode>())
-    } }
-    if (result?.isError == true) {
+    ) {
+        if (expanded) preview()
+    }
+}
+
+@Composable
+private fun ToolResultError(result: ToolResultNode) {
+    val colors = DsTheme.colors
+    if (result.isError) {
         // The dot is colour-only, so the word stays — but without a second dot beside it.
         //
         // The call's own failure text, not a generic apology: "Something went wrong" told the
         // reader nothing they could act on, while the result body carries the command's stderr,
         // the refused path, or the tool's own message. The generic string is only the fallback
         // for a result that genuinely carries no prose.
-        val failure = remember(result?.content) { toolFailureMessage(result?.content) }
+        val failure = remember(result.content) { toolFailureMessage(result.content) }
         Text(
-            failure ?: stringResource(R.string.common_error),
+            failure?.lineSequence()?.firstOrNull()?.take(240) ?: stringResource(R.string.common_error),
             style = DsType.caption11,
             color = colors.error,
             modifier = Modifier.padding(start = 26.dp),
@@ -731,17 +704,17 @@ internal fun toolFailureMessage(content: JsonElement?): String? {
         is JsonPrimitive -> fromText(element.contentOrNull)
         is JsonArray -> element.firstNotNullOfOrNull { walk(it) }
         is JsonObject -> {
-            val type = element["type"]?.jsonPrimitive?.contentOrNull
+            val type = (element["type"] as? JsonPrimitive)?.contentOrNull
             // A container part (tool-result, or a nesting this build has not seen) is descended
             // into; a text part ends the search; anything else — an image, a structured blob — is
             // skipped rather than dumped at the reader.
             when {
                 type == "text" || (type == null && element.containsKey("text")) ->
-                    fromText(element["text"]?.jsonPrimitive?.contentOrNull)
+                    fromText((element["text"] as? JsonPrimitive)?.contentOrNull)
                 element.containsKey("content") -> walk(element["content"])
                 // A flat error object: take its human-readable field.
                 else -> fromText(
-                    (element["message"] ?: element["error"])?.jsonPrimitive?.contentOrNull,
+                    ((element["message"] ?: element["error"]) as? JsonPrimitive)?.contentOrNull,
                 )
             }
         }

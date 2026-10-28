@@ -1,141 +1,93 @@
 package com.labteto.dshmobile.ui.screens.main
 
 import com.labteto.dshmobile.core.session.*
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
 class ProcessFoldTest {
     private fun call(seq: Long) = ToolCallNode(seq, "c$seq", "read", "{}", 1, 1)
-    private fun user(seq: Long, text: String = "hello") =
-        UserMessageNode(seq, "u$seq", listOf(ChatBlock("text", text)), "user")
-    private fun answer(seq: Long, text: String = "done") =
-        AssistantMessageNode(seq, "a$seq", 1, 1, listOf(ChatBlock("text", text)))
-    private fun reasoning(seq: Long, text: String = "thinking it over") =
-        AssistantMessageNode(seq, "a$seq", 1, 1, listOf(ChatBlock("reasoning", text)))
+    private fun user(seq: Long) = UserMessageNode(seq, "u$seq", listOf(ChatBlock("text", "hello")), "user")
+    private fun answer(seq: Long) = AssistantMessageNode(seq, "a$seq", 1, 1, listOf(ChatBlock("text", "done")))
+    private fun reasoning(seq: Long) = answer(seq).copy(blocks = listOf(ChatBlock("reasoning", "thinking")))
+    private val outline = Json.parseToJsonElement("""[{"turn":7,"seq":10,"prompt":"hello","response":"done"},{"turn":8,"seq":30,"prompt":"next","response":""}]""")
 
-    /** Matches the transcript: turn starts never reach the row list, only the fold's boundary list. */
-    private fun fold(nodes: List<ChatNode>, turnStarts: List<Long>, running: Boolean = false) =
-        foldProcessRows(groupToolRows(nodes), turnStarts, running)
-
-    @Test fun `the work between a prompt and its answer folds into one row`() {
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), answer(5)),
-            turnStarts = listOf(1),
-        )
-        assertEquals(3, rows.size)
-        assertTrue(rows[0] is TranscriptRow.Message)
-        val process = rows[1] as TranscriptRow.Process
-        assertEquals(listOf(3L, 4L), process.rows.map { it.seq })
-        assertEquals(2, process.steps)
-        assertEquals(5L, rows[2].seq)
+    @Test fun `completed runtime turn preserves prompt and final with one numbered process`() {
+        val rows = transcriptRows(listOf(TurnStartNode(1, 1), user(2), reasoning(3), call(4), answer(5), TurnEndNode(6, 1, "completed")), false)
+        assertEquals(listOf(2L, 4L, 5L), rows.map { it.seq })
+        assertTrue(rows.none { it is TranscriptRow.Process })
+        assertEquals(1, historyRowIndex(rows, 4))
     }
 
-    @Test fun `the prompt stays outside the fold`() {
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), answer(5)),
-            turnStarts = listOf(1),
-        )
-        val first = rows[0] as TranscriptRow.Message
-        assertEquals(2L, first.seq)
-        assertTrue(first.node is UserMessageNode)
+    @Test fun `outline supplies missing local start and stable key as page expands`() {
+        val tail = listOf(call(14), reasoning(15), call(16), answer(18), TurnEndNode(20, 7, "completed"))
+        val partial = transcriptRows(tail, true, outline)
+        val full = transcriptRows(listOf(TurnStartNode(10, 7), user(11), reasoning(12)) + tail, true, outline)
+        assertTrue(partial.none { it is TranscriptRow.Process })
+        assertTrue(full.none { it is TranscriptRow.Process })
+        assertEquals(18L, partial.last().seq)
     }
 
-    @Test fun `a turn that answered straight away is left alone`() {
-        val rows = fold(listOf(user(2), answer(3)), turnStarts = listOf(1))
+    @Test fun `outline response and idle state do not prove successful completion`() {
+        val rows = transcriptRows(listOf(call(14), reasoning(15), answer(18)), false, outline)
+        assertTrue(rows.none { it is TranscriptRow.Process })
+    }
+
+    @Test fun `failed interrupted aborted and unknown endings remain open`() {
+        for (reason in listOf("error", "interrupted", "aborted", "forked", "unknown")) {
+            val rows = transcriptRows(listOf(call(14), reasoning(15), answer(18), TurnEndNode(20, 7, reason)), false, outline)
+            assertTrue(reason, rows.none { it is TranscriptRow.Process })
+        }
+    }
+
+    @Test fun `streaming and interrupted messages never fold`() {
+        for (message in listOf(answer(18).copy(streaming = true), answer(18).copy(interrupted = true))) {
+            val rows = transcriptRows(listOf(call(14), reasoning(15), message, TurnEndNode(20, 7, "completed")), true, outline)
+            assertTrue(rows.none { it is TranscriptRow.Process })
+        }
+    }
+
+    @Test fun `steering remains visible without multiple process headers`() {
+        val rows = transcriptRows(listOf(TurnStartNode(10, 7), user(11), call(12), reasoning(13), user(14), call(15), answer(18), TurnEndNode(20, 7, "completed")), false, outline)
+        assertTrue(rows.none { it is TranscriptRow.Process })
+        assertNotNull(historyRowIndex(rows, 14))
+    }
+
+    @Test fun `partial window human input is not assumed to be opening prompt`() {
+        val rows = transcriptRows(listOf(user(14), call(15), reasoning(16), answer(18), TurnEndNode(20, 7, "completed")), false, outline)
+        assertTrue(rows.none { it is TranscriptRow.Process })
+    }
+
+    @Test fun `context stays accessible in chronological order`() {
+        val context = UserMessageNode(13, "s", listOf(ChatBlock("text", "skill")), "skill-invocation")
+        val rows = transcriptRows(listOf(TurnStartNode(10, 7), user(11), call(12), context, call(15), answer(18), TurnEndNode(20, 7, "completed")), false, outline)
+        assertTrue(rows.none { it is TranscriptRow.Process })
+        assertEquals(listOf(11L, 12L, 18L), rows.map { it.seq })
+    }
+
+    @Test fun `leading injected context stays outside the single process`() {
+        val context = UserMessageNode(12, "s", listOf(ChatBlock("text", "skill")), "skill-invocation")
+        val rows = transcriptRows(listOf(TurnStartNode(10, 7), user(11), context, call(15), answer(18), TurnEndNode(20, 7, "completed")), false, outline)
+        assertTrue(rows.none { it is TranscriptRow.Context || it is TranscriptRow.Process })
+    }
+
+    @Test fun `adjacent calls across invisible boundaries never merge`() {
+        val rows = transcriptRows(listOf(call(14), TurnEndNode(20, 7, "completed"), TurnStartNode(30, 8), call(31)), true, outline)
         assertEquals(2, rows.size)
+        assertEquals(listOf(14L), (rows[0] as TranscriptRow.Tools).calls.map { it.seq })
+        assertEquals(listOf(31L), (rows[1] as TranscriptRow.Tools).calls.map { it.seq })
+    }
+
+    @Test fun `sparse completed work without prompt or answer remains expandable`() {
+        val rows = transcriptRows(listOf(reasoning(14), call(16), TurnEndNode(20, 7, "completed")), false, outline)
+        val tools = rows.single() as TranscriptRow.Tools
+        assertEquals(listOf(16L), tools.calls.map { it.seq })
+        val entry = HistoryEntry(10, "hello", false, null, 7, 10, 30)
+        assertEquals(16L, historyJumpTarget(entry, listOf(reasoning(14), call(16), TurnEndNode(20, 7, "completed")), false, outline))
+    }
+
+    @Test fun `mismatched runtime end does not close outline turn`() {
+        val rows = transcriptRows(listOf(call(14), reasoning(16), TurnEndNode(20, 6, "completed")), false, outline)
         assertTrue(rows.none { it is TranscriptRow.Process })
-    }
-
-    @Test fun `a running turn keeps its steps on screen`() {
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), answer(5)),
-            turnStarts = listOf(1),
-            running = true,
-        )
-        assertEquals(4, rows.size)
-        assertTrue(rows.none { it is TranscriptRow.Process })
-    }
-
-    @Test fun `injected context keeps a row of its own`() {
-        val skill = UserMessageNode(3, "s", listOf(ChatBlock("text", "skill body")), "skill-invocation")
-        val rows = fold(
-            listOf(user(2), skill, reasoning(4), call(5), answer(6)),
-            turnStarts = listOf(1),
-        )
-        assertEquals(4, rows.size)
-        assertTrue(rows[1] is TranscriptRow.Context)
-        assertEquals(listOf(4L, 5L), (rows[2] as TranscriptRow.Process).rows.map { it.seq })
-        assertEquals(6L, rows[3].seq)
-    }
-
-    @Test fun `a steering message stays on screen and splits the fold`() {
-        // Steering lands inside the running turn: no turn start of its own.
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), user(5, "use the other file"), reasoning(6), call(7), answer(8)),
-            turnStarts = listOf(1),
-        )
-        assertEquals(listOf(2L, 3L, 5L, 6L, 8L), rows.map { it.seq })
-        assertEquals(listOf(3L, 4L), (rows[1] as TranscriptRow.Process).rows.map { it.seq })
-        assertTrue((rows[2] as TranscriptRow.Message).node is UserMessageNode)
-        assertEquals(listOf(6L, 7L), (rows[3] as TranscriptRow.Process).rows.map { it.seq })
-        // The history sheet lists the steer as something the reader sent; its jump needs the row.
-        assertEquals(2, historyRowIndex(rows, 5L))
-    }
-
-    @Test fun `the step count sums every tool call in the fold`() {
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), call(5), answer(6)),
-            turnStarts = listOf(1),
-        )
-        assertEquals(3, (rows[1] as TranscriptRow.Process).steps)
-    }
-
-    @Test fun `narration on the way to the answer folds with the steps`() {
-        val rows = fold(
-            listOf(user(2), answer(3, "let me read that file"), call(4), answer(5)),
-            turnStarts = listOf(1),
-        )
-        assertEquals(3, rows.size)
-        assertEquals(listOf(3L, 4L), (rows[1] as TranscriptRow.Process).rows.map { it.seq })
-        assertEquals(5L, rows[2].seq)
-    }
-
-    @Test fun `a single step stays a row of its own`() {
-        val rows = fold(listOf(user(2), call(3), answer(4)), turnStarts = listOf(1))
-        assertEquals(3, rows.size)
-        assertTrue(rows[1] is TranscriptRow.Tools)
-    }
-
-    @Test fun `a turn whose reply never settled is left alone`() {
-        val rows = fold(
-            listOf(user(2), reasoning(3), call(4), answer(5, "")),
-            turnStarts = listOf(1),
-        )
-        assertEquals(4, rows.size)
-        assertTrue(rows.none { it is TranscriptRow.Process })
-    }
-
-    @Test fun `each turn folds on its own`() {
-        val rows = fold(
-            listOf(
-                user(2), reasoning(3), call(4), answer(5),
-                user(7), reasoning(8), call(9), answer(10),
-            ),
-            turnStarts = listOf(1, 6),
-        )
-        assertEquals(6, rows.size)
-        assertEquals(listOf(3L, 4L), (rows[1] as TranscriptRow.Process).rows.map { it.seq })
-        assertEquals(listOf(8L, 9L), (rows[4] as TranscriptRow.Process).rows.map { it.seq })
-    }
-
-    @Test fun `rows before the first turn start are untouched`() {
-        val rows = fold(listOf(user(1), reasoning(2), answer(3)), turnStarts = listOf(9))
-        assertEquals(3, rows.size)
-        assertTrue(rows.none { it is TranscriptRow.Process })
-    }
-
-    @Test fun `no turn starts means nothing to fold against`() {
-        val rows = fold(listOf(user(1), reasoning(2), call(3), answer(4)), turnStarts = emptyList())
-        assertEquals(4, rows.size)
     }
 }

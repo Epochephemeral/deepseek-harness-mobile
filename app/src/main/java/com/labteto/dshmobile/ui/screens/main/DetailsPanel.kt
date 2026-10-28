@@ -617,16 +617,8 @@ private fun GoalCard(conversation: ConversationSnapshot, store: com.labteto.dshm
             Text(stringResource(R.string.goal_none), style = DsType.caption11, color = colors.labelTertiary)
             return@Card
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                goal.objective,
-                style = DsType.small13,
-                color = colors.labelPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(DsSpacing.small))
-            DsPill(text = stringResource(goalPhaseLabelRes(goal.phase)))
-        }
+        // One live goal surface owns both the objective/status and its actions.
+        GoalBar(goal, store, expanded = true)
         goal.blockedReason?.let {
             Text(
                 stringResource(R.string.goal_blocked_reason, it.message),
@@ -641,7 +633,6 @@ private fun GoalCard(conversation: ConversationSnapshot, store: com.labteto.dshm
                 color = colors.labelCaption,
             )
         }
-        GoalBar(goal, store)
     }
 }
 

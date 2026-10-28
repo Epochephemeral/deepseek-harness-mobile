@@ -70,12 +70,36 @@ class ChatNodeVisibilityTest {
         assertFalse(node.showsToolPreview(node.blocks.single(), true, emptySet()))
     }
 
+    @Test fun `result without its call remains visible and does not acquire invented call facts`() {
+        val result = ToolResultNode(9, "outside-page", kotlinx.serialization.json.JsonPrimitive("full output"), false, 1, 1)
+        assertEquals(listOf(result), renderableChatNodes(listOf(result), false))
+        assertTrue(result.isOrphanResult(listOf(result)))
+        val other = ToolCallNode(8, "unrelated", "read", "{}", 1, 1)
+        assertEquals(listOf(other, result), renderableChatNodes(listOf(other, result), true))
+        val call = other.copy(callId = result.callId)
+        assertEquals(listOf(call), renderableChatNodes(listOf(call, result), false))
+        assertFalse(result.isOrphanResult(listOf(call, result)))
+    }
+
+    @Test fun `tool grouping and process folding preserve access to orphan output`() {
+        val prompt = UserMessageNode(2, "u", listOf(ChatBlock("text", "question")), "user")
+        val result = ToolResultNode(4, "outside-page", kotlinx.serialization.json.JsonPrimitive("output"), true, 1, 1)
+        val answer = AssistantMessageNode(6, "answer", 1, 1, listOf(ChatBlock("text", "answer")))
+        val rows = foldProcessRows(groupToolRows(renderableChatNodes(listOf(prompt, result, answer), false)), listOf(1L))
+        fun contains(items: List<TranscriptRow>): Boolean = items.any { row -> when (row) {
+            is TranscriptRow.Message -> row.node == result
+            is TranscriptRow.Process -> contains(row.rows)
+            else -> false
+        } }
+        assertTrue(contains(rows))
+    }
+
     @Test
     fun `structural nodes draw nothing`() {
         assertFalse(TurnStartNode(seq = 1, turn = 1).rendersContent())
         assertFalse(
             ToolResultNode(seq = 2, callId = "c", content = null, isError = false, turn = 1, step = 1)
-                .rendersContent(),
+                .rendersContent(knownToolCallIds = setOf("c")),
         )
         assertFalse(TurnEndNode(seq = 3, turn = 1, reasonKind = "completed").rendersContent())
     }
@@ -91,7 +115,7 @@ class ChatNodeVisibilityTest {
         // The compatibility contract keeps genuinely unknown types visible; the noise is named.
         assertFalse(OtherNode(seq = 4, type = "step/start", data = JsonNull).rendersContent())
         assertFalse(OtherNode(seq = 5, type = "assistant/chunk", data = JsonNull).rendersContent())
-        assertTrue(OtherNode(seq = 6, type = "something/new", data = JsonNull).rendersContent())
+        assertFalse(OtherNode(seq = 6, type = "something/new", data = JsonNull).rendersContent())
     }
 
     @Test
@@ -171,17 +195,18 @@ class ChatNodeVisibilityTest {
             OtherNode(seq = 7, type = "step/end", data = JsonNull),
             TurnEndNode(seq = 8, turn = 1, reasonKind = "completed"),
         )
-        assertEquals(listOf(3L, 4L, 5L), nodes.filter { it.rendersContent() }.map { it.seq })
+        // Pairing is a window-level fact: the isolated predicate has no knowledge of c1's call.
+        assertEquals(listOf(5L), renderableChatNodes(nodes, running = false).map { it.seq })
     }
 
     /** An empty reasoning block is spacing once settled, but the Thinking row while it streams. */
     @Test fun `blank reasoning renders only while its message is live`() {
         val live = AssistantMessageNode(seq = 9, messageId = null, turn = 1, step = 1, streaming = true,
             blocks = listOf(ChatBlock(kind = "reasoning", text = "")))
-        assertTrue(live.rendersContent(running = true))
+        assertFalse(live.rendersContent(running = true))
         assertFalse(live.rendersContent(running = false))
         assertFalse(live.copy(streaming = false).rendersContent(running = true))
-        assertTrue(live.copy(streaming = false, blocks = listOf(ChatBlock("reasoning", "plan"))).rendersContent())
+        assertFalse(live.copy(streaming = false, blocks = listOf(ChatBlock("reasoning", "plan"))).rendersContent())
     }
 
     /** A rewind withdraws its range from the transcript; its marker stays, drawn as the divider. */

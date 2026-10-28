@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reader_tool_result">Tool result</string>
+    <string name="reader_tool_running">Running</string>
+    <string name="reader_tool_done">Done</string>
+    <string name="reader_tool_error">Error</string>
+    <string name="reader_tool_unknown">Status unavailable</string>
+    <string name="reader_task_pending">Pending</string>
+    <string name="reader_task_running">In progress</string>
+    <string name="reader_task_done">Completed</string>
+    <string name="reader_image_reference">Image attachment</string>
+    <string name="reader_image_preview">Tap to load preview</string>
+</resources>

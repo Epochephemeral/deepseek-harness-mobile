@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.labteto.dshmobile.core.session.*
 import com.labteto.dshmobile.ui.components.FeatherIcons
@@ -36,8 +38,11 @@ internal sealed interface TranscriptRow {
      * groups in between are one tap away instead of a wall of collapsed headers. See
      * [foldProcessRows] for exactly what gets folded.
      */
-    data class Process(val rows: List<TranscriptRow>, val steps: Int) : TranscriptRow {
-        override val seq get() = rows.first().seq
+    data class Process(
+        val rows: List<TranscriptRow>, val steps: Int,
+        val turnStartSeq: Long = rows.first().seq, val turn: Long? = null,
+    ) : TranscriptRow {
+        override val seq get() = turnStartSeq
     }
 }
 
@@ -62,43 +67,52 @@ internal fun groupToolRows(nodes: List<ChatNode>): List<TranscriptRow> {
     return rows
 }
 
+/** Build exactly the same bounded-window rows for rendering and history navigation. */
+internal fun transcriptRows(
+    nodes: List<ChatNode>,
+    running: Boolean,
+    turnOutline: kotlinx.serialization.json.JsonElement? = null,
+): List<TranscriptRow> {
+    val outline = parseTurnOutline(turnOutline).orEmpty()
+    val localStarts = nodes.filterIsInstance<TurnStartNode>()
+    val numbers = outline.associate { it.seq to it.turn } + localStarts.associate { it.seq to it.turn.toLong() }
+    val starts = numbers.keys.sorted()
+    // Group AFTER partitioning: invisible turn boundaries must also split adjacent tool calls.
+    val rows = renderableChatNodes(nodes, running).groupBy { turnIndexOf(it.seq, starts) }
+        .values.flatMap(::groupToolRows)
+    // Public assistant messages stay visible, including commentary before the final answer.
+    return rows
+}
+
 /**
- * Fold the work a turn did before it answered into one [TranscriptRow.Process].
- *
- * Collapsed, a step still costs a row. A turn that thinks, reads four files, thinks again and then
- * answers therefore leaves a stack of collapsed headers between the prompt and the reply — folded
- * ones, but on a phone that stack still fills the screen. Everything between the turn's prompt and
- * the message the turn settled on belongs to one row instead: prompt, folded process, answer.
- *
- * [turnStarts] is the session's `turn/start` sequences, ascending. They are read from the unfiltered
- * nodes because a turn start draws no row of its own, so the rows alone cannot say where a turn
- * begins.
- *
- * Two turns are left alone on purpose. A turn with no settled reply has nothing to fold against. And
- * the last turn is skipped while [running], because its steps are happening in front of the reader
- * rather than behind an answer.
+ * One process per successfully closed runtime turn, never per contiguous tool chunk.
+ * Outline entries establish boundaries, NOT completion: even error ends commit their preview.
+ * Unknown endings stay open. No extra events are fetched or retained to manufacture certainty.
  */
 internal fun foldProcessRows(
     rows: List<TranscriptRow>,
     turnStarts: List<Long>,
     running: Boolean = false,
+    turnEnds: List<TurnEndNode> = emptyList(),
+    turnNumbers: Map<Long, Long> = emptyMap(),
+    loadedStarts: Set<Long> = turnStarts.toSet(),
 ): List<TranscriptRow> {
     if (rows.isEmpty() || turnStarts.isEmpty()) return rows
-    val folded = mutableListOf<TranscriptRow>()
-    var index = 0
-    while (index < rows.size) {
-        val turn = turnIndexOf(rows[index].seq, turnStarts)
-        var end = index + 1
-        while (end < rows.size && turnIndexOf(rows[end].seq, turnStarts) == turn) end++
-        val slice = rows.subList(index, end)
-        val isLast = end >= rows.size
-        folded += if (turn < 0 || (running && isLast)) slice else foldTurnProcess(slice)
-        index = end
+    val ends = turnEnds.associateBy { turnIndexOf(it.seq, turnStarts) }
+    return rows.groupBy { turnIndexOf(it.seq, turnStarts) }.flatMap { (index, slice) ->
+        val start = turnStarts.getOrNull(index)
+        val end = ends[index]
+        val number = start?.let { turnNumbers[it] }
+        if (start == null || end?.reasonKind != "completed" ||
+            (number != null && end.turn.toLong() != number) ||
+            slice.any { row -> (row as? TranscriptRow.Message)?.node.let {
+                it is AssistantMessageNode && (it.streaming || it.interrupted)
+            } }) slice
+        else foldTurnProcess(slice, start, number ?: end.turn.toLong(), start in loadedStarts, end.seq)
     }
-    return folded
 }
 
-/** Which turn a sequence belongs to, or -1 for events before the first `turn/start`. */
+/** Which runtime turn owns a sequence, including when its local start is outside the window. */
 private fun turnIndexOf(seq: Long, turnStarts: List<Long>): Int {
     var low = 0
     var high = turnStarts.size - 1
@@ -110,77 +124,39 @@ private fun turnIndexOf(seq: Long, turnStarts: List<Long>): Int {
     return found
 }
 
-/** One turn's rows, with the stretch between its prompt and its answer folded. */
-private fun foldTurnProcess(rows: List<TranscriptRow>): List<TranscriptRow> {
-    val promptIndex = rows.indexOfFirst { row ->
+private fun foldTurnProcess(
+    rows: List<TranscriptRow>, start: Long, turn: Long, startLoaded: Boolean, endSeq: Long,
+): List<TranscriptRow> {
+    val firstWork = rows.indexOfFirst { row ->
+        row !is TranscriptRow.Context && (row as? TranscriptRow.Message)?.node !is UserMessageNode
+    }
+    if (firstWork < 0) return rows
+    // Match desktop's always-open interleaved-input rule. In partial windows even the first
+    // human message may be steering. Context is also kept visible without splitting one turn
+    // into several process disclosures or reordering its chronology.
+    val users = rows.filterIsInstance<TranscriptRow.Message>().count { it.node is UserMessageNode }
+    if (users > (if (startLoaded) 1 else 0) || rows.drop(firstWork).any {
+        it is TranscriptRow.Context || (it as? TranscriptRow.Message)?.node is UserMessageNode
+    }) return rows
+    val answer = rows.indexOfLast { row ->
         val node = (row as? TranscriptRow.Message)?.node
-        node is UserMessageNode && !node.isInjectedContext && !node.isRewindMarker
+        node is AssistantMessageNode && !node.streaming && node.plainText.isNotBlank() && node.seq < endSeq
     }
-    if (promptIndex < 0) return rows
-    // The last message with text is the answer; anything the turn wrote earlier was narration on the
-    // way to it, which is exactly what the fold is for.
-    val answerIndex = rows.indexOfLast { row ->
-        val node = (row as? TranscriptRow.Message)?.node
-        node is AssistantMessageNode && !node.streaming && node.plainText.isNotBlank()
+    val until = if (answer >= firstWork) answer else rows.indexOfFirst { it.seq >= endSeq }.let {
+        if (it < 0) rows.size else it
     }
-    if (answerIndex <= promptIndex) return rows
-    val folded = mutableListOf<TranscriptRow>()
-    folded += rows.subList(0, promptIndex + 1)
-    var run = mutableListOf<TranscriptRow>()
-    fun flush() {
-        if (run.isEmpty()) return
-        folded += if (run.size > 1) {
-            val steps = run.sumOf { if (it is TranscriptRow.Tools) it.calls.size else 1 }
-            TranscriptRow.Process(run.toList(), steps)
-        } else {
-            run.first()
-        }
-        run = mutableListOf()
-    }
-    for (index in promptIndex + 1 until answerIndex) {
-        val row = rows[index]
-        // Injected context is its own disclosure with its own header. Burying it inside the fold
-        // would hide a control the reader may want on its own.
-        //
-        // A user message is never a step either. Steering lands inside the running turn, not in a
-        // turn of its own, so a reader who corrected the agent halfway would find their own words
-        // folded away, and the history sheet's jump to them would land on nothing. The fold splits
-        // around it instead: what led up to the correction, the correction, what followed it.
-        val keep = row is TranscriptRow.Context ||
-            (row as? TranscriptRow.Message)?.node is UserMessageNode
-        if (keep) { flush(); folded += row } else run += row
-    }
-    flush()
-    folded += rows.subList(answerIndex, rows.size)
-    return folded
+    if (until <= firstWork) return rows
+    val work = rows.subList(firstWork, until)
+    val process = TranscriptRow.Process(work.toList(), work.sumOf {
+        if (it is TranscriptRow.Tools) it.calls.size else 1
+    }, start, turn)
+    return rows.take(firstWork) + process + rows.drop(until)
 }
 
 @Composable
 internal fun ToolGroupRow(calls: List<ToolCallNode>, context: ChatNodeContext) {
-    var expanded by remember(calls.first().callId) { mutableStateOf(false) }
-    val colors = DsTheme.colors
-    val results = context.nodes.filterIsInstance<ToolResultNode>().associateBy { it.callId }
-    val failed = calls.count { results[it.callId]?.isError == true }
-    val running = context.running && calls.any { it.callId !in results }
-    val starts = calls.mapNotNull { context.eventTimes[it.seq] }
-    val ends = calls.mapNotNull { results[it.callId]?.let { r -> context.eventTimes[r.seq] } }
-    val elapsed = if (starts.isNotEmpty() && ends.isNotEmpty()) (ends.max() - starts.min()).coerceAtLeast(0) else null
-    Column(Modifier.fillMaxWidth().clip(DsShapes.block).background(colors.bgLayer1)
-        .border(1.dp, colors.borderL2, DsShapes.block)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).clickable(role = Role.Button) { expanded = !expanded }
-            .padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(FeatherIcons.Tool, null, Modifier.size(14.dp), tint = colors.labelTertiary)
-            Text(stringResource(R.string.chat_tool_group_count, calls.size), style = DsType.small13, color = colors.labelSecondary)
-            if (failed > 0) Text(stringResource(R.string.chat_tool_group_failed, failed), style = DsType.caption11, color = colors.error)
-            Spacer(Modifier.weight(1f))
-            Text(if (running) stringResource(R.string.jobs_running) else elapsed?.let(::formatDurationMs).orEmpty(),
-                style = DsType.caption11, color = if (running) colors.accent else colors.labelCaption)
-            Icon(FeatherIcons.ChevronRight, null, Modifier.size(14.dp).graphicsLayer { rotationZ = if (expanded) 90f else 0f }, tint = colors.labelTertiary)
-        }
-        if (expanded) Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
-            calls.forEach { call -> key(call.callId) { ToolCallRow(call, context, compact = true) } }
-        }
+    Column(Modifier.fillMaxWidth()) {
+        calls.forEach { call -> key(call.callId) { ToolCallRow(call, context, compact = true) } }
     }
 }
 
@@ -205,21 +181,25 @@ internal fun ContextGroupRow(nodes: List<ChatNode>, context: ChatNodeContext) {
 /**
  * The folded steps of one turn.
  *
- * Deliberately the same shape as the two disclosures above — a 36dp header on `bgLayer1` with a
- * chevron — because it is the same gesture at a larger granularity: expand to see what happened.
+ * The same visual language as the tool/context disclosures, with a full-size touch target
+ * and a stable runtime-turn identity across bounded disk windows.
  */
 @Composable
 internal fun ProcessRow(row: TranscriptRow.Process, context: ChatNodeContext) {
     var expanded by remember(row.seq) { mutableStateOf(false) }
+    val disclosureState = stringResource(if (expanded) R.string.ux_b_expanded else R.string.ux_b_collapsed)
     val colors = DsTheme.colors
     Column(Modifier.fillMaxWidth().clip(DsShapes.block).background(colors.bgLayer1)
         .border(1.dp, colors.borderL2, DsShapes.block)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).clickable(role = Role.Button) { expanded = !expanded }
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .semantics { stateDescription = disclosureState }
+            .clickable(role = Role.Button) { expanded = !expanded }
             .padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(FeatherIcons.Activity, null, Modifier.size(14.dp), tint = colors.labelTertiary)
             Text(
-                stringResource(R.string.chat_process_title) + " · " +
+                (row.turn?.let { stringResource(R.string.trajectory_turn, it) + " · " }.orEmpty()) +
+                    stringResource(R.string.chat_process_title) + " · " +
                     pluralStringResource(R.plurals.trajectory_step_count, row.steps, row.steps),
                 style = DsType.small13,
                 color = colors.labelSecondary,

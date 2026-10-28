@@ -69,7 +69,8 @@ import com.labteto.dshmobile.R
 import com.labteto.dshmobile.ui.theme.Ds
 import com.labteto.dshmobile.core.markdown.safeHttpUrl
 import com.labteto.dshmobile.core.markdown.MdBlock
-import com.labteto.dshmobile.core.markdown.parseMarkdown
+import com.labteto.dshmobile.core.markdown.IncrementalMarkdown
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.text.style.TextDecoration
 import kotlin.math.pow
 
@@ -103,45 +104,47 @@ fun isFolderReference(path: String): Boolean {
  */
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier) {
-    val colors = DsTheme.colors
-    // The parser lives in :core (pure JVM) so it is unit-testable and survives a renderer rewrite.
-    // List items arrive one per block, so runs of them are regrouped here: the renderer needs the
-    // whole list at once to number an ordered list and to keep the markers in one column.
-    val blocks = remember(text) { groupListBlocks(parseMarkdown(text)) }
+    // Retain only grammar-proven completed prefixes. The unfinished suffix may still change shape
+    // (e.g. paragraph -> table) and is parsed normally, with no cutoff or delayed content.
+    val parser = remember { IncrementalMarkdown() }
+    val blocks = remember(text) { groupListBlocks(parser.update(text)) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        blocks.forEach { render ->
-            when (render) {
-                is RenderBlock.ListRun -> MdListBlock(render)
-                is RenderBlock.Of -> when (val block = render.block) {
-                is MdBlock.Heading -> {
-                    val style = when (block.level) {
-                        1 -> DsType.mdH1
-                        2 -> DsType.mdH2
-                        3 -> DsType.mdH3
-                        else -> DsType.mdH4
-                    }
-                    InlineMarkdown(block.text, style.copy(color = colors.labelPrimary), Modifier.padding(top = 10.dp))
-                }
-                // A paragraph's line breaks are kept, as the web client keeps them: a model that
-                // lists one file per line meant one file per line, and joining with a space made
-                // `README.md src` out of two separate names.
-                is MdBlock.Paragraph -> InlineMarkdown(
-                    block.lines.joinToString("\n"),
-                    DsType.mdBody.copy(color = colors.labelPrimary),
-                    Modifier.fillMaxWidth(),
-                )
-                                is MdBlock.Blockquote -> MdBlockquote(block)
-                is MdBlock.Code -> CodeBlock(block.lang, block.code)
-                is MdBlock.HorizontalRule -> HorizontalRuleLine()
-                    is MdBlock.Table -> MdTableBlock(block)
-                    // Grouped away above; the parser never hands a bare item to the renderer.
-                    is MdBlock.ListItem -> Unit
-                }
-            }
+        blocks.forEachIndexed { index, render ->
+            key(index) { MarkdownRenderBlock(render) }
         }
     }
 }
 
+/** A separate skippable group keeps completed block layouts out of a changing suffix's work. */
+@Composable
+private fun MarkdownRenderBlock(render: RenderBlock) {
+    val colors = DsTheme.colors
+    when (render) {
+        is RenderBlock.ListRun -> MdListBlock(render)
+        is RenderBlock.Of -> when (val block = render.block) {
+            is MdBlock.Heading -> {
+                val style = when (block.level) {
+                    1 -> DsType.mdH1
+                    2 -> DsType.mdH2
+                    3 -> DsType.mdH3
+                    else -> DsType.mdH4
+                }
+                InlineMarkdown(block.text, style.copy(color = colors.labelPrimary), Modifier.padding(top = 10.dp))
+            }
+            // Preserve line breaks and all inline parsing behavior of the existing renderer.
+            is MdBlock.Paragraph -> InlineMarkdown(
+                block.lines.joinToString("\n"),
+                DsType.mdBody.copy(color = colors.labelPrimary),
+                Modifier.fillMaxWidth(),
+            )
+            is MdBlock.Blockquote -> MdBlockquote(block)
+            is MdBlock.Code -> CodeBlock(block.lang, block.code)
+            is MdBlock.HorizontalRule -> HorizontalRuleLine()
+            is MdBlock.Table -> MdTableBlock(block)
+            is MdBlock.ListItem -> Unit // grouped into ListRun above
+        }
+    }
+}
 
 // ---- List grouping -----------------------------------------------------------
 
@@ -152,6 +155,7 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
  * needs the run so it can number an ordered list and align every marker in one column. The run is
  * broken by a blank line only — a nested item stays in its parent's run, carrying its own indent.
  */
+@Immutable
 private sealed interface RenderBlock {
     data class Of(val block: MdBlock) : RenderBlock
     data class ListRun(val items: List<MdBlock.ListItem>, val ordered: Boolean) : RenderBlock

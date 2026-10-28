@@ -174,17 +174,13 @@ class HoldGestureTest {
             step = 1,
         )
         transcript(listOf(user(1, prompt), call, result))
-        // Calls sit in a collapsed group; the hold is on the call's own row inside it.
-        compose.onNodeWithText(context.getString(R.string.chat_tool_group_count, 1)).performClick()
-        compose.waitForIdle()
-
-        holdOn("List the sources")
-        compose.onNodeWithText(string(R.string.hold_copy_command)).performClick()
-        compose.runOnIdle { assertEquals("ls -la src", clipboard.text) }
-
-        holdOn("List the sources")
-        compose.onNodeWithText(string(R.string.hold_copy_output)).performClick()
-        compose.runOnIdle { assertEquals("main.kt", clipboard.text) }
+        // Minimal reader rows have no hidden raw-output/argument hold actions.
+        compose.onNodeWithText("bash").assertExists()
+        compose.onNodeWithText("List the sources").assertDoesNotExist()
+        compose.onNodeWithText("main.kt").assertDoesNotExist()
+        holdOn("bash")
+        compose.onNode(hasTestTag(HOLD_MENU_TAG)).assertDoesNotExist()
+        compose.runOnIdle { assertNull(clipboard.text) }
     }
 
     @Test

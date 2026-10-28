@@ -11,6 +11,8 @@ import com.labteto.dshmobile.core.session.ChatBlock
 import com.labteto.dshmobile.core.session.ChatNode
 import com.labteto.dshmobile.core.session.ConversationSnapshot
 import com.labteto.dshmobile.core.session.UserMessageNode
+import com.labteto.dshmobile.core.session.TurnStartNode
+import com.labteto.dshmobile.core.session.TurnEndNode
 import com.labteto.dshmobile.ui.theme.DshTheme
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -49,6 +51,10 @@ class ChatTranscriptTailTest {
     private class Harness {
         var nodes by mutableStateOf<List<ChatNode>>(emptyList())
         lateinit var listState: LazyListState
+        var interactionEnabled by mutableStateOf(true)
+        var hasNewer by mutableStateOf(false)
+        var reportedAnchor: Long? = null
+        var reportedAtTail = true
     }
 
     private fun harness(initial: List<ChatNode>): Harness {
@@ -58,7 +64,7 @@ class ChatTranscriptTailTest {
             h.listState = rememberLazyListState()
             DshTheme {
                 ChatTranscript(
-                    conversation = ConversationSnapshot(sessionId = "s1", nodes = h.nodes, running = true),
+                    conversation = ConversationSnapshot(sessionId = "s1", nodes = h.nodes, running = true, hasNewer = h.hasNewer),
                     loading = false,
                     loadingOlder = false,
                     loadOlderFailed = false,
@@ -72,6 +78,11 @@ class ChatTranscriptTailTest {
                     ),
                     listState = h.listState,
                     onLoadOlder = {},
+                    historyInteractionEnabled = h.interactionEnabled,
+                    onHistoryViewport = { anchor, atTail ->
+                        h.reportedAnchor = anchor
+                        h.reportedAtTail = atTail
+                    },
                 )
             }
         }
@@ -83,11 +94,17 @@ class ChatTranscriptTailTest {
         listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
     }
 
-    private fun Harness.firstVisibleKey(): Any? =
-        compose.runOnIdle { listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key }
+    private fun Harness.firstVisibleKey(): Any? = compose.runOnIdle {
+        // Padding can include a preceding row, which does not own firstVisibleItemScrollOffset.
+        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }?.key
+    }
 
-    // By hand rather than through scrollToItem: following only changes its mind at the end of a
-    // scroll session, and a programmatic scroll can open and close one inside a single frame.
+    private fun Harness.anchorDebug(): String = compose.runOnIdle {
+        "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset} " +
+            "visible=${listState.layoutInfo.visibleItemsInfo.map { Triple(it.index, it.key, it.offset) }}"
+    }
+
+    // By hand rather than through scrollToItem: only a genuine user movement changes follow intent.
     // In reverse layout a downward drag pulls older rows into view.
     private fun scrollBackByHand() {
         compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() }
@@ -101,6 +118,62 @@ class ChatTranscriptTailTest {
             compose.waitForIdle()
         }
         assertTrue("never got back to the bottom", atTail())
+    }
+
+    @Test
+    fun layoutBottomAndObserverRestartsDoNotRearmFollowing() {
+        val history = longHistory()
+        val h = harness(history)
+        scrollBackByHand()
+        compose.runOnIdle {
+            assertFalse(h.reportedAtTail)
+            h.interactionEnabled = false
+        }
+        compose.waitForIdle()
+        // Stand in for a layout clamp: no genuine user gesture returned to the bottom.
+        compose.runOnIdle { runBlocking { h.listState.scrollToItem(0) } }
+        compose.runOnIdle { h.hasNewer = true }
+        compose.waitForIdle()
+        compose.runOnIdle { h.hasNewer = false; h.interactionEnabled = true }
+        compose.waitForIdle()
+        compose.runOnIdle { assertFalse(h.reportedAtTail) }
+        val anchor = h.firstVisibleKey()
+        val offset = compose.runOnIdle { h.listState.firstVisibleItemScrollOffset }
+        compose.runOnIdle { h.nodes = history + assistant(60, "must not reclaim the reader") }
+        compose.waitForIdle()
+        assertEquals(h.anchorDebug(), anchor, h.firstVisibleKey())
+        compose.runOnIdle { assertEquals(offset, h.listState.firstVisibleItemScrollOffset) }
+        assertFalse(h.atTail())
+    }
+
+    @Test
+    fun completionPreservesVisiblePublicWorkWithoutFollowingTheAnswer() {
+        val work = longHistory() + TurnStartNode(90, 1) + user(91, "work prompt") +
+            (100L..139L).map { assistant(it, "work segment $it") }
+        val h = harness(work)
+        scrollBackByHand() // establish genuine away intent, independently of device fling distance
+        compose.runOnIdle { runBlocking { h.listState.scrollToItem(12, 9) } }
+        compose.waitForIdle()
+        val oldAnchor = h.firstVisibleKey()
+        assertTrue("fixture must be reading work that will fold", oldAnchor is Long && oldAnchor in 100L..139L)
+        compose.runOnIdle {
+            h.nodes = work + assistant(140, "final answer") + TurnEndNode(141, 1, "completed")
+        }
+        compose.waitForIdle()
+        assertEquals(h.anchorDebug(), oldAnchor, h.firstVisibleKey())
+        compose.runOnIdle { assertEquals(9, h.listState.firstVisibleItemScrollOffset) }
+        assertFalse(h.atTail())
+        compose.runOnIdle { assertFalse(h.reportedAtTail) }
+        compose.runOnIdle { h.nodes = h.nodes + TurnStartNode(149, 2) + user(150, "later arrival") }
+        compose.waitForIdle()
+        assertEquals(h.anchorDebug(), oldAnchor, h.firstVisibleKey())
+        compose.runOnIdle { assertEquals(9, h.listState.firstVisibleItemScrollOffset) }
+    }
+
+    @Test
+    fun viewportReportsStreamingSequenceRatherThanOlderDurableNeighbor() {
+        val h = harness(longHistory() + assistant(1000, "streaming", streaming = true))
+        compose.runOnIdle { assertEquals(1000L, h.reportedAnchor) }
     }
 
     @Test

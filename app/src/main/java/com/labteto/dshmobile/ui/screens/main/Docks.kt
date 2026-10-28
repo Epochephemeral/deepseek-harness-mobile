@@ -97,7 +97,13 @@ internal fun TodoDock(todos: List<TodoEntry>, modifier: Modifier = Modifier) {
             ) {
                 StateDot(todoStatusDot(todo.status), size = 8.dp)
                 Spacer(Modifier.width(8.dp))
-                Text(todo.content, style = DsType.small13, color = DsTheme.colors.labelSecondary)
+                Text(todo.content, Modifier.weight(1f), style = DsType.small13, color = DsTheme.colors.labelSecondary)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(when (readerTaskStatus(todo.status)) {
+                    "completed" -> R.string.reader_task_done
+                    "in_progress" -> R.string.reader_task_running
+                    else -> R.string.reader_task_pending
+                }), style = DsType.caption11, color = DsTheme.colors.labelTertiary)
             }
         }
         Spacer(Modifier.height(2.dp))
@@ -123,7 +129,12 @@ internal fun GoalSummary(goal: GoalSnapshot) {
 
 /** The live goal bar above the composer, with its phase verbs. */
 @Composable
-internal fun GoalBar(goal: GoalSnapshot, store: SessionStore, modifier: Modifier = Modifier) {
+internal fun GoalBar(
+    goal: GoalSnapshot,
+    store: SessionStore,
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false,
+) {
     val scope = rememberCoroutineScope()
     val colors = DsTheme.colors
     var editing by remember { mutableStateOf(false) }
@@ -145,7 +156,7 @@ internal fun GoalBar(goal: GoalSnapshot, store: SessionStore, modifier: Modifier
             goal.objective,
             style = DsType.small13,
             color = colors.labelSecondary,
-            maxLines = 3,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
