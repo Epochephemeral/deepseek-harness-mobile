@@ -1,2 +1,0 @@
-# Unified patches contain required single-space context lines.
-integrations/dsh-reader/*.patch -whitespace
