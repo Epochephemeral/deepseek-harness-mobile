@@ -10,14 +10,44 @@ at `93a7910`.
 
 ### Added
 
+- Per-session message delivery feedback that confirms the host's receipt above the composer.
+- Optional personal-build connection defaults and remembered endpoint prefill.
 - Cached conversation previews with background synchronization and a persistent source marker.
-- Settings for cache usage, manual clearing and capacity (2 GB by default), with LRU eviction.
+- Unified local-cache usage and confirmed manual clearing; the capacity picker (2 GB by default)
+  and LRU apply only to disposable previews, not the full disk history archive.
 - Cache, bootstrap and opt-in Android network/UI tests.
 - A separately installable **DSH Mobile Local** debug build.
 
 ### Changed
 
-- Initial history and subagent history use compressed HTTP reads at the live stream’s opening cursor.
+- Remembered hosts continue retrying while unavailable, and ready generations replace
+  pending session initialization. Returning to the foreground resumes recovery.
+- Connection recovery stays silent for three seconds, then shows localized reconnecting
+  status and actionable handshake failures;
+  session and subagent follow errors are scoped to the active connection generation.
+- Main conversations now require additive host `session/readerFollow` / `session/readerPage` endpoints:
+  latest-only bounded snapshots, gesture-triggered older paging, separate reader caches, and explicit
+  capability errors on unsupported hosts. Subagent detail history retains its existing raw read path.
+- The lightweight reader preserves all public replies, tool names/descriptions/status, current tasks
+  and goals, and artifact references; raw tool output/internal context are not downloaded by default.
+  Tool-image previews load only on explicit tap. Existing host endpoints and original archives remain unchanged.
+- The full turn directory supports direct history seek independently of the loaded window; live updates
+  preserve reading position, and older-page retry remains available in Zen.
+- Host compatibility patch and deployment requirements are documented in
+  [the reader integration guide](integrations/dsh-reader/README.md).
+- Background connection intent survives process recreation without overriding an explicit disconnect,
+  terminal authentication failure, or Android's exhausted foreground-service budget.
+- Completion notifications are wired to session events; question deduplication uses request identity,
+  and cold/warm notification taps resolve the correct saved host and session after baseline loading.
+- Replace the withdrawn resource cutoffs with the approved disk-first design: indexed full history,
+  bidirectional RAM windows, incremental replies/Markdown, ordered disk-backed backlogs and streamed
+  large RPC responses. No archive eviction, arbitrary content rejection or overflow reconnect;
+  legacy long turns and individual huge blocks can still require substantial memory.
+- Main and child transcripts retain reading keys/offsets while paging; history-picker dismissal
+  and tab transitions restore the original reading window before exposing it.
+- Subagent sessions no longer appear in conversation lists, pinned rows, search or archives;
+  the parent's subagent panel and ordinary fork conversations remain available.
+- See [mobile runtime reliability](docs/mobile-runtime-reliability.md) for current behavior and verification scope.
 
 ## [Unreleased]
 
