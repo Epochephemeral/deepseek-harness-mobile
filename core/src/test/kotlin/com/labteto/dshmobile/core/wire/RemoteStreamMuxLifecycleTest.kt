@@ -144,6 +144,29 @@ class RemoteStreamMuxLifecycleTest {
         assertEquals(1, closes)
     }
 
+    @Test
+    fun `slow readers retain queued items without an assistant imposed cutoff`() = runTest {
+        lateinit var socket: Socket
+        val mux = RemoteStreamMux { Socket(it).also { socket = it } }
+        mux.start()
+        val stream = mux.open("test")
+        repeat(1_100) { socket.item("buffered-$it") }
+        assertEquals(null, mux.failure)
+        repeat(1_100) { assertEquals(JsonPrimitive("buffered-$it"), stream.receive()) }
+        stream.cancel()
+        mux.close()
+    }
+
+    @Test
+    fun `logical streams are not rejected at the withdrawn stream count threshold`() {
+        val mux = RemoteStreamMux { Socket(it) }
+        mux.start()
+        val streams = List(140) { mux.open("test-$it") }
+        assertEquals(null, mux.failure)
+        streams.forEach { it.cancel() }
+        mux.close()
+    }
+
     companion object {
         private val client = OkHttpClient()
     }

@@ -41,71 +41,71 @@ object AssistantStream {
 
     /** Expand [stream] (the wire `stream` array) into its timed chunks, in order. */
     fun expand(stream: JsonElement?): List<TimedChunk> {
-        val records = stream as? JsonArray ?: return emptyList()
         val out = ArrayList<TimedChunk>()
-        for (candidate in records) {
-            val record = candidate as? JsonObject ?: return emptyList()
-            when (record["type"]?.jsonPrimitive?.contentOrNull) {
-                CHUNK -> {
-                    val time = record["time"]?.time() ?: return emptyList()
-                    val chunk = record["chunk"] as? JsonObject ?: return emptyList()
-                    out.add(TimedChunk(time, chunk))
-                }
-                TEXT, REASONING, TOOL_CALL -> {
-                    val members = expandRun(record) ?: return emptyList()
-                    out.addAll(members)
-                }
-                else -> return emptyList()
-            }
-        }
+        forEachExpanded(stream) { out.add(it) }
         return out
     }
 
-    private fun expandRun(record: JsonObject): List<TimedChunk>? {
-        val type = record["type"]?.jsonPrimitive?.contentOrNull ?: return null
-        val members = (if (type == TOOL_CALL) record["args"] else record["texts"]) as? JsonArray ?: return null
-        val index = record["index"]?.jsonPrimitive?.intOrNull?.takeIf { it >= 0 } ?: return null
-        // One shorter than the member list by construction; a record that disagrees is malformed.
-        val gaps = record["dt"] as? JsonArray ?: JsonArray(emptyList())
-        if (members.isNotEmpty() && gaps.size != members.size - 1) return null
+    /**
+     * Validate the complete stream before invoking [consume], then expand one chunk at a time.
+     * A malformed tail must not publish a valid-looking but incomplete prefix. The two passes
+     * retain no expanded list; the wire DTO is necessarily alive until this call returns.
+     */
+    fun forEachExpanded(stream: JsonElement?, consume: (TimedChunk) -> Unit): Boolean {
+        if (!visit(stream, null)) return false
+        return visit(stream, consume)
+    }
 
+    private fun visit(stream: JsonElement?, consume: ((TimedChunk) -> Unit)?): Boolean {
+        val records = stream as? JsonArray ?: return false
+        for (candidate in records) {
+            val record = candidate as? JsonObject ?: return false
+            when (record["type"]?.jsonPrimitive?.contentOrNull) {
+                CHUNK -> {
+                    val time = record["time"]?.time() ?: return false
+                    val chunk = record["chunk"] as? JsonObject ?: return false
+                    consume?.invoke(TimedChunk(time, chunk))
+                }
+                TEXT, REASONING, TOOL_CALL -> if (!expandRun(record, consume)) return false
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    private fun expandRun(record: JsonObject, consume: ((TimedChunk) -> Unit)?): Boolean {
+        val type = record["type"]?.jsonPrimitive?.contentOrNull ?: return false
+        val members = (if (type == TOOL_CALL) record["args"] else record["texts"]) as? JsonArray ?: return false
+        val index = record["index"]?.jsonPrimitive?.intOrNull?.takeIf { it >= 0 } ?: return false
+        val gaps = record["dt"] as? JsonArray ?: JsonArray(emptyList())
+        if (members.isNotEmpty() && gaps.size != members.size - 1) return false
         val toolCallId = record["id"]?.jsonPrimitive?.contentOrNull
-        if (type == TOOL_CALL && toolCallId == null) return null
-        // Present only when every member carried the same name; its absence is meaningful rather
-        // than a lookup failure, so it is neither defaulted nor required.
+        if (type == TOOL_CALL && toolCallId == null) return false
         val hasName = record.containsKey("name")
         val toolName = record["name"]?.jsonPrimitive?.contentOrNull
-        if (hasName && toolName == null) return null
-
-        val out = ArrayList<TimedChunk>(members.size)
-        var time = record["time0"]?.time() ?: return null
+        if (hasName && toolName == null) return false
+        var time = record["time0"]?.time() ?: return false
         for (k in members.indices) {
-            // A gap may be negative: the host's wall clock can step backwards between two chunks
-            // and the format records what happened rather than what is tidy.
-            if (k > 0) time += gaps[k - 1].time() ?: return null
-            val member = (members[k] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
-            val chunk = when (type) {
-                TEXT -> buildJsonObject {
-                    put("type", JsonPrimitive("text-delta"))
+            if (k > 0) time += gaps[k - 1].time() ?: return false
+            val member = (members[k] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (consume != null) {
+                val chunk = buildJsonObject {
+                    put("type", JsonPrimitive(when (type) {
+                        TEXT -> "text-delta"
+                        REASONING -> "reasoning-delta"
+                        else -> "tool-call-delta"
+                    }))
                     put("index", JsonPrimitive(index))
-                    put("text", JsonPrimitive(member))
+                    if (type == TOOL_CALL) {
+                        put("id", JsonPrimitive(toolCallId))
+                        if (hasName) put("name", JsonPrimitive(toolName))
+                        put("argumentsDelta", JsonPrimitive(member))
+                    } else put("text", JsonPrimitive(member))
                 }
-                REASONING -> buildJsonObject {
-                    put("type", JsonPrimitive("reasoning-delta"))
-                    put("index", JsonPrimitive(index))
-                    put("text", JsonPrimitive(member))
-                }
-                else -> buildJsonObject {
-                    put("type", JsonPrimitive("tool-call-delta"))
-                    put("index", JsonPrimitive(index))
-                    put("id", JsonPrimitive(toolCallId))
-                    if (hasName) put("name", JsonPrimitive(toolName))
-                    put("argumentsDelta", JsonPrimitive(member))
-                }
+                consume(TimedChunk(time, chunk))
             }
-            out.add(TimedChunk(time, chunk))
         }
-        return out
+        return true
     }
 
     /** Read a wire time or gap; the host writes safe integers, but a float is not worth a crash. */

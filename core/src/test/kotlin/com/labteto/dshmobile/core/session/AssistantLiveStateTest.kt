@@ -45,6 +45,24 @@ class AssistantLiveStateTest {
         transientEnvelopes().map { it.data.jsonObject.getValue("chunk").jsonObject.getValue("text").jsonPrimitive.content }
 
     @Test
+    fun `reader accepts sparse source indices while raw remains strict`() {
+        val reader = AssistantLiveState()
+        reader.seed(null, sparseReader = true)
+        reader.accept(start())
+        assertEquals(Change.CHANGED, reader.accept(chunk(4, "public", revision = 8)))
+        assertEquals(Change.NONE, reader.accept(chunk(4, "duplicate", revision = 8)))
+        assertEquals(Change.CHANGED, reader.accept(chunk(9, " text", revision = 20)))
+        assertEquals(listOf("public", " text"), reader.texts())
+        assertEquals(Change.SETTLED, reader.accept(end(15, AssistantStreamOutcome.Committed(eventType = "assistant/message", seq = 7))))
+        val raw = AssistantLiveState()
+        raw.accept(start())
+        assertEquals(Change.CHANGED, raw.accept(chunk(0, "existing raw prefix")))
+        assertEquals(Change.RESET, raw.accept(chunk(4, "not contiguous")))
+        assertFalse(raw.active)
+        assertTrue(raw.transientEnvelopes().isEmpty())
+    }
+
+    @Test
     fun `chunks accumulate into transient rows for the open attempt`() {
         val state = AssistantLiveState()
         assertEquals(Change.NONE, state.accept(start()))
@@ -163,6 +181,26 @@ class AssistantLiveStateTest {
         assertEquals(Change.CHANGED, state.accept(chunk(2, " more", attempt = "a9", revision = 8)))
         assertEquals(listOf("so", " far", " more"), state.texts())
         assertTrue(state.acceptDurable("assistant/message", turn = 3, step = 1, seq = 13, surfaceOp = "append"))
+    }
+
+    @Test
+    fun `long live attempts retain their preview beyond the withdrawn chunk threshold`() {
+        val state = AssistantLiveState()
+        state.accept(start())
+        repeat(4_200) { assertEquals(Change.CHANGED, state.accept(chunk(it, "fragment-$it"))) }
+        assertTrue(state.active)
+        assertEquals(4_200, state.chunkCount)
+        assertEquals("fragment-4199", state.texts().last())
+    }
+
+    @Test
+    fun `large live chunks are not discarded by an assistant imposed payload budget`() {
+        val text = "x".repeat(2 * 1024 * 1024 + 1)
+        val state = AssistantLiveState()
+        state.accept(start())
+        assertEquals(Change.CHANGED, state.accept(chunk(0, text)))
+        assertTrue(state.active)
+        assertEquals(text, state.texts().single())
     }
 
     @Test

@@ -67,6 +67,70 @@ class EventFold(private val sessionId: String) {
     }
 
     /**
+     * Reuse a durable fold while the current model attempt streams. Only the transient
+     * prefix is rebuilt, rather than reparsing tool results and the whole journal every frame.
+     * Legacy journals with durable deltas retain the original merge path.
+     */
+    fun withTransient(durable: ConversationSnapshot, transient: List<SessionEventEnvelope>): ConversationSnapshot {
+        require(durable.sessionId == sessionId)
+        if (transient.isEmpty()) return durable
+        if (durable.journal.any { it.type == "assistant/chunk" }) return fold(durable.journal, transient)
+        val preview = FoldState(sessionId)
+        preview.lastSeq = durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
+        transient.forEach { preview.applyTransient(it) }
+        return durable.copy(nodes = durable.nodes + preview.snapshot().nodes)
+    }
+
+    /**
+     * Append-only live preview. A chunk is merged when accepted, not replayed on each UI tick.
+     * Only immutable ChatBlock/String snapshots leave the fold. A changed durable baseline can
+     * rebase sequence numbers without touching the modern preview's accumulated text.
+     */
+    internal class TransientAccumulator {
+        private val preview = FoldState("")
+        private var base: ConversationSnapshot? = null
+        private var baseCursor = -1L
+        private var legacy: FoldState? = null
+        private var legacyPosition = 0L
+        private var cached: ConversationSnapshot? = null
+        private var cachedCount = -1
+        var appliedChunks: Long = 0
+            private set
+
+        fun append(turn: Int, step: Int, chunk: JsonObject) {
+            preview.applyTransientChunk(turn, step, chunk)
+            appliedChunks++
+        }
+
+        fun snapshot(durable: ConversationSnapshot, turn: Int, step: Int, chunks: PreviewChunkJournal): ConversationSnapshot {
+            if (chunks.count == 0) return durable
+            if (base !== durable) {
+                base = durable
+                baseCursor = durable.journal.lastOrNull { it.foldsToNode() }?.seq ?: -1L
+                legacy = if (durable.journal.any { it.type == "assistant/chunk" }) {
+                    FoldState(durable.sessionId).also { state ->
+                        durable.journal.filter { it.foldsToNode() }.forEach(state::apply)
+                    }
+                } else null
+                legacyPosition = 0L
+                cached = null
+            }
+            cached?.takeIf { cachedCount == chunks.count }?.let { return it }
+            val combined = legacy?.let { state ->
+                legacyPosition = chunks.replayFrom(legacyPosition) { timed -> state.applyTransientChunk(turn, step, timed.chunk) }
+                state.snapshot().copy(journal = durable.journal, effectiveSurface = durable.effectiveSurface,
+                    lastSeq = durable.lastSeq, gap = durable.gap)
+            } ?: run {
+                preview.lastSeq = baseCursor
+                durable.copy(nodes = durable.nodes + preview.snapshot().nodes)
+            }
+            cachedCount = chunks.count
+            cached = combined
+            return combined
+        }
+    }
+
+    /**
      * Incremental folding with the snapshot as the accumulator.
      * Streaming callers keep the previous snapshot and re-render on change.
      */
@@ -124,6 +188,7 @@ private class FoldState(private val sessionId: String) {
         var toolName: String? = null
         var arguments = StringBuilder()
         var raw: JsonElement? = null
+        var cached: ChatBlock? = null
     }
 
     private val openByKey = linkedMapOf<String, OpenAssistant>()
@@ -177,11 +242,14 @@ private class FoldState(private val sessionId: String) {
         mergeChunk(turn, step, chunk)
     }
 
+    fun applyTransientChunk(turn: Int, step: Int, chunk: JsonObject) = mergeChunk(turn, step, chunk)
+
     fun apply(event: SessionEventEnvelope) {
         if (event.seq > lastSeq + 1 && lastSeq >= 0 && !gap) gap = true
         lastSeq = maxOf(lastSeq, event.seq)
         val data = event.data
         when (event.type) {
+            "reader/skip" -> Unit // Coverage placeholder only; never a visible or model-facing row.
             "turn/start" -> {
                 val turn = data.jsonObject["turn"]?.jsonPrimitive?.intOrNull ?: 0
                 nodes.add(TurnStartNode(event.seq, turn))
@@ -253,6 +321,14 @@ private class FoldState(private val sessionId: String) {
                 val turn = data.jsonObject["turn"]?.jsonPrimitive?.intOrNull ?: 0
                 val step = data.jsonObject["step"]?.jsonPrimitive?.intOrNull ?: 0
                 openByKey.remove(key(turn, step))
+                val reader = data.jsonObject["reader"] as? JsonObject
+                if (reader?.get("uncommittedAttempt")?.jsonPrimitive?.booleanOrNull == true) {
+                    val message = data.jsonObject["message"] as? JsonObject
+                    val blocks = parseBlocks(message?.get("content"))
+                    if (blocks.isNotEmpty()) nodes.add(AssistantMessageNode(event.seq,
+                        message?.get("id")?.jsonPrimitive?.contentOrNull, turn, step, blocks,
+                        interrupted = true, uncommittedAttempt = true))
+                }
             }
 
             "tool/call" -> {
@@ -261,14 +337,16 @@ private class FoldState(private val sessionId: String) {
                 val args = data.jsonObject["arguments"]?.jsonPrimitive?.contentOrNull ?: ""
                 val turn = data.jsonObject["turn"]?.jsonPrimitive?.intOrNull ?: 0
                 val step = data.jsonObject["step"]?.jsonPrimitive?.intOrNull ?: 0
-                nodes.add(ToolCallNode(event.seq, callId, name, args, turn, step))
+                nodes.add(ToolCallNode(event.seq, callId, name, args, turn, step,
+                    description = data.jsonObject["description"]?.jsonPrimitive?.contentOrNull))
             }
 
             "tool/result" -> {
                 val result = toolResultOf(data.jsonObject["message"] as? JsonObject)
                 val turn = data.jsonObject["turn"]?.jsonPrimitive?.intOrNull ?: 0
                 val step = data.jsonObject["step"]?.jsonPrimitive?.intOrNull ?: 0
-                nodes.add(ToolResultNode(event.seq, result.callId, result.content, result.isError, turn, step, data.jsonObject["meta"]))
+                nodes.add(ToolResultNode(event.seq, result.callId, result.content, result.isError, turn, step, data.jsonObject["meta"],
+                    outputOmitted = (data.jsonObject["reader"] as? JsonObject)?.get("outputOmitted")?.jsonPrimitive?.booleanOrNull == true))
             }
 
             // Harness 0.1.7: the agent's tool set changed mid-session. Model-visible context, not
@@ -361,6 +439,7 @@ private class FoldState(private val sessionId: String) {
         val open = openByKey.getOrPut(key(turn, step)) { OpenAssistant(turn, step) }
         while (open.blocks.size <= index) open.blocks.add(MutableChatBlockAccumulator())
         val acc = open.blocks[index]
+        acc.cached = null
         when (type) {
             "block-start" -> acc.kind = chunk["blockType"]?.jsonPrimitive?.contentOrNull ?: "unknown"
             "text-delta" -> {
@@ -393,8 +472,12 @@ private class FoldState(private val sessionId: String) {
     }
 
     private fun commit(open: OpenAssistant): List<ChatBlock> = open.blocks.map { acc ->
+        acc.cached ?: immutableBlock(acc).also { acc.cached = it }
+    }
+
+    private fun immutableBlock(acc: MutableChatBlockAccumulator): ChatBlock {
         val assembled = acc.raw?.jsonObject
-        when {
+        return when {
             acc.kind == "text" || acc.kind == "reasoning" -> ChatBlock(
                 kind = acc.kind,
                 text = assembled?.get("text")?.jsonPrimitive?.contentOrNull ?: acc.text.toString(),

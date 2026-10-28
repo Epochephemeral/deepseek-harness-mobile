@@ -88,6 +88,8 @@ data class AssistantMessageNode(
      * Its `seq` is minted past the durable cursor and is not stable across folds.
      */
     val streaming: Boolean = false,
+    /** Public text retained from an attempt that never committed a final answer. */
+    val uncommittedAttempt: Boolean = false,
 ) : ChatNode {
     val plainText: String
         get() = blocks.filter { it.kind == "text" }.joinToString("") { it.text.orEmpty() }
@@ -100,6 +102,7 @@ data class ToolCallNode(
     val arguments: String,
     val turn: Int,
     val step: Int,
+    val description: String? = null,
 ) : ChatNode
 
 data class ToolResultNode(
@@ -115,6 +118,8 @@ data class ToolResultNode(
     val turn: Int,
     val step: Int,
     val meta: JsonElement? = null,
+    /** Empty reader content is omitted output, not proof the actual result was empty. */
+    val outputOmitted: Boolean = false,
 ) : ChatNode
 
 /**
@@ -167,6 +172,8 @@ data class ConversationSnapshot(
     val gap: Boolean = false,
     /** Local presentation metadata; a cached preview carries no live-state authority. */
     val fromCache: Boolean = false,
+    /** Newer durable content is on disk outside this viewport; the live stream still drains. */
+    val hasNewer: Boolean = false,
 ) {
     val turns: Int get() = nodes.count { it is TurnStartNode }
 }

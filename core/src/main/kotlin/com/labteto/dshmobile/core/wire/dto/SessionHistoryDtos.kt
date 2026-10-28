@@ -205,6 +205,9 @@ data class SessionPageRequest(
     @SerialName("beforeSeq") val beforeSeq: Int? = null,
     /** Caps user/assistant message count without dropping tools or state between them. */
     @SerialName("maxMessages") val maxMessages: Int? = null,
+    @SerialName("view") val view: String? = null,
+    @SerialName("maxRows") val maxRows: Int? = null,
+    @SerialName("maxBytes") val maxBytes: Int? = null,
 )
 
 /** One contiguous backwards page of a session log. */
@@ -212,6 +215,7 @@ data class SessionPageRequest(
 data class SessionPage(
     @SerialName("records") val records: List<SessionHistoryRecord> = emptyList(),
     @SerialName("hasMore") val hasMore: Boolean = false,
+    @SerialName("reader") val reader: SessionReaderCoverage? = null,
 )
 
 /**
@@ -226,6 +230,9 @@ data class SessionPage(
 data class SessionFollowRequest(
     @SerialName("address") val address: SessionAddress,
     @SerialName("maxMessages") val maxMessages: Int? = null,
+    @SerialName("view") val view: String? = null,
+    @SerialName("maxRows") val maxRows: Int? = null,
+    @SerialName("maxBytes") val maxBytes: Int? = null,
     @SerialName("assistantStream") val assistantStream: Boolean? = null,
 )
 
@@ -444,6 +451,7 @@ sealed class SessionFollowFrame {
          * snapshot, so its absence there means the host predates the feature.
          */
         @SerialName("assistantStream") val assistantStream: SessionAssistantStreamBaseline? = null,
+        @SerialName("reader") val reader: SessionReaderCoverage? = null,
     ) : SessionFollowFrame()
 
     /** One durable event appended after the opening cursor. */
@@ -706,3 +714,15 @@ object WorkspaceFollowFrameSerializer : KSerializer<WorkspaceFollowFrame> {
         }
     }
 }
+
+/** Reader-v1 acknowledgement and inclusive raw-sequence coverage, never inferred from visible rows. */
+@Serializable
+data class SessionReaderCoverage(
+    val version: Int,
+    val fromSeq: Int,
+    val throughSeq: Int,
+    val nextBeforeSeq: Int?,
+    val bytes: Long,
+    val oversized: Boolean,
+    val rawDetails: String,
+)

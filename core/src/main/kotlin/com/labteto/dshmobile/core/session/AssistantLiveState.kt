@@ -3,9 +3,11 @@ package com.labteto.dshmobile.core.session
 import com.labteto.dshmobile.core.wire.dto.AssistantStreamOutcome
 import com.labteto.dshmobile.core.wire.dto.SessionAssistantStreamBaseline
 import com.labteto.dshmobile.core.wire.dto.SessionAssistantStreamFrame
+import com.labteto.dshmobile.core.storage.DiskCacheStore
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 
 /**
  * The reply being written right now, as far as the follow stream has shown it.
@@ -26,7 +28,7 @@ import kotlinx.serialization.json.buildJsonObject
  *
  * Not thread-safe; the session store calls it under its own lock.
  */
-class AssistantLiveState {
+class AssistantLiveState(private val diskCacheStore: DiskCacheStore? = null) {
 
     private class Attempt(
         val attemptId: String,
@@ -34,7 +36,9 @@ class AssistantLiveState {
         val turn: Int,
         val step: Int,
         var nextIndex: Int,
-        val chunks: MutableList<TimedChunk>,
+        val chunks: PreviewChunkJournal,
+        val preview: EventFold.TransientAccumulator = EventFold.TransientAccumulator(),
+        var checkedDurable: ConversationSnapshot? = null,
     )
 
     /** What one frame did to the visible state. */
@@ -68,11 +72,11 @@ class AssistantLiveState {
     val attemptId: String? get() = attempt?.attemptId
 
     /** Number of chunks the open attempt holds. */
-    val chunkCount: Int get() = attempt?.chunks?.size ?: 0
+    val chunkCount: Int get() = attempt?.chunks?.count ?: 0
 
     /** Forget everything; a new generation or a different session starts from nothing. */
     fun clear() {
-        attempt = null
+        closeAttempt()
     }
 
     /**
@@ -82,36 +86,47 @@ class AssistantLiveState {
      * `nextIndex` the position the next live chunk will carry, so at most that many members are
      * kept — the host promises the two agree, but the count is what the continuity check trusts.
      */
-    fun seed(baseline: SessionAssistantStreamBaseline?) {
-        attempt = null
+    private var sparseReader = false
+
+    fun seed(baseline: SessionAssistantStreamBaseline?, sparseReader: Boolean = false) {
+        this.sparseReader = sparseReader
+        closeAttempt()
         revision = baseline?.revision ?: 0
         val opening = baseline?.activeAttempt ?: return
-        val chunks = AssistantStream.expand(opening.stream)
-        attempt = Attempt(
-            attemptId = opening.attemptId,
-            startedAfterSeq = opening.startedAfterSeq,
-            turn = opening.turn,
-            step = opening.step,
-            nextIndex = opening.nextIndex,
-            chunks = chunks.take(opening.nextIndex.coerceAtLeast(0)).toMutableList(),
-        )
+        val open = newAttempt(opening.attemptId, opening.startedAfterSeq, opening.turn, opening.step, opening.nextIndex)
+        try {
+            var seen = 0
+            AssistantStream.forEachExpanded(opening.stream) { timed ->
+                if (seen++ < opening.nextIndex) {
+                    open.chunks.append(timed)
+                    open.preview.append(open.turn, open.step, timed.chunk)
+                }
+            }
+            attempt = open
+        } catch (failure: Exception) {
+            try { open.chunks.close() } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
     }
 
     /** Fold one live frame. */
     fun accept(frame: SessionAssistantStreamFrame): Change {
+        // Reader filtering preserves source watermarks but intentionally omits private chunks.
+        // This relaxation is opt-in; raw followers still require dense chunk indices.
+        if (sparseReader && frame.revision <= revision) return Change.NONE
         revision = frame.revision
         return when (frame) {
             is SessionAssistantStreamFrame.Start -> {
                 // A start while one is open means the previous end never reached us. Its rows are
                 // stale by definition, and the new attempt is the one worth showing.
-                val dropped = attempt?.chunks?.isNotEmpty() == true
-                attempt = Attempt(
+                val dropped = (attempt?.chunks?.count ?: 0) > 0
+                closeAttempt()
+                attempt = newAttempt(
                     attemptId = frame.attemptId,
                     startedAfterSeq = frame.startedAfterSeq,
                     turn = frame.turn,
                     step = frame.step,
                     nextIndex = 0,
-                    chunks = mutableListOf(),
                 )
                 if (dropped) Change.RESET else Change.NONE
             }
@@ -122,19 +137,26 @@ class AssistantLiveState {
                 // known start.
                 val open = attempt ?: return Change.NONE
                 if (open.attemptId != frame.attemptId) return Change.NONE
-                if (frame.index != open.nextIndex) return reset()
-                open.nextIndex += 1
+                if (sparseReader && frame.index < open.nextIndex) return Change.NONE
+                if (!sparseReader && frame.index != open.nextIndex) return reset()
+                open.nextIndex = frame.index + 1
                 val chunk = frame.chunk as? JsonObject ?: return Change.NONE
-                open.chunks.add(TimedChunk(frame.time, chunk))
+                try {
+                    open.chunks.append(TimedChunk(frame.time, chunk))
+                    open.preview.append(open.turn, open.step, chunk)
+                } catch (failure: Exception) {
+                    try { closeAttempt() } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }
+                    throw failure
+                }
                 Change.CHANGED
             }
 
             is SessionAssistantStreamFrame.End -> {
                 val open = attempt ?: return Change.NONE
                 if (open.attemptId != frame.attemptId) return Change.NONE
-                attempt = null
+                closeAttempt()
                 when {
-                    frame.index != open.nextIndex -> Change.RESET
+                    (!sparseReader && frame.index != open.nextIndex) || frame.index < open.nextIndex -> Change.RESET
                     frame.outcome is AssistantStreamOutcome.Committed -> Change.SETTLED
                     else -> Change.ABANDONED
                 }
@@ -159,7 +181,7 @@ class AssistantLiveState {
         if (type != "assistant/message" && type != "assistant/attempt") return false
         if (type == "assistant/message" && surfaceOp != null && surfaceOp != "append") return false
         if (seq <= open.startedAfterSeq || turn != open.turn || step != open.step) return false
-        attempt = null
+        closeAttempt()
         return true
     }
 
@@ -172,23 +194,59 @@ class AssistantLiveState {
      */
     fun transientEnvelopes(): List<SessionEventEnvelope> {
         val open = attempt ?: return emptyList()
-        return open.chunks.mapIndexed { index, timed ->
-            SessionEventEnvelope(
+        val envelopes = ArrayList<SessionEventEnvelope>()
+        open.chunks.replayFrom(0) { timed ->
+            envelopes.add(SessionEventEnvelope(
                 type = "assistant/chunk",
-                seq = index.toLong(),
+                seq = envelopes.size.toLong(),
                 time = timed.time,
                 data = buildJsonObject {
                     put("turn", JsonPrimitive(open.turn))
                     put("step", JsonPrimitive(open.step))
                     put("chunk", timed.chunk)
                 },
-            )
+            ))
         }
+        return envelopes
+    }
+
+    /** Immutable live view without remapping/replaying the already accepted chunk prefix. */
+    fun transientSnapshot(durable: ConversationSnapshot): ConversationSnapshot {
+        val open = attempt ?: return durable
+        if (open.checkedDurable !== durable) {
+            open.checkedDurable = durable
+            durableSettlementChecks++
+            // A disk page can arrive ahead of this follow's live Entry. Use exactly the same
+            // settlement checks as that event path, so the provisional reply is never duplicated.
+            for (event in durable.journal.asReversed()) {
+                if (event.type != "assistant/message" && event.type != "assistant/attempt") continue
+                val data = event.data as? JsonObject ?: continue
+                if (acceptDurable(event.type, (data["turn"] as? JsonPrimitive)?.intOrNull,
+                    (data["step"] as? JsonPrimitive)?.intOrNull, event.seq, event.surfaceOp)) return durable
+            }
+        }
+        return open.preview.snapshot(durable, open.turn, open.step, open.chunks)
+    }
+
+    /** Identity changes, not preview chunks or repeated renders, trigger reconciliation work. */
+    internal var durableSettlementChecks: Long = 0
+        private set
+
+    /** Test-visible work count: snapshots never increase this, only accepted chunks/seed do. */
+    internal val previewAppliedChunks: Long get() = attempt?.preview?.appliedChunks ?: 0
+
+    private fun newAttempt(attemptId: String, startedAfterSeq: Int, turn: Int, step: Int, nextIndex: Int): Attempt =
+        Attempt(attemptId, startedAfterSeq, turn, step, nextIndex, previewChunkJournal(diskCacheStore))
+
+    private fun closeAttempt() {
+        val old = attempt
+        attempt = null
+        old?.chunks?.close()
     }
 
     private fun reset(): Change {
-        val dropped = attempt?.chunks?.isNotEmpty() == true
-        attempt = null
+        val dropped = (attempt?.chunks?.count ?: 0) > 0
+        closeAttempt()
         return if (dropped) Change.RESET else Change.NONE
     }
 }

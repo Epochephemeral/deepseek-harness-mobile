@@ -1,13 +1,21 @@
 package com.labteto.dshmobile.core.wire
 
+import com.labteto.dshmobile.core.storage.DiskCacheStore
+import com.labteto.dshmobile.core.storage.DiskLease
+import java.io.Closeable
+import java.io.ByteArrayInputStream
+import java.io.Reader
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -30,17 +38,37 @@ import okio.BufferedSink
  * One HTTP carrier exchange: the status code and raw body of a POST /api request.
  * HTTP status is carrier-only — business errors arrive as HTTP 200 with `ok: false` in the body.
  */
-data class RpcHttpResponse(
+class RpcHttpResponse(
     val status: Int,
-    val body: String,
-    /** The response `Content-Type`, when the carrier reported one. */
+    body: String,
+    /** Original HTTP content type; disk JSON is normalized to UTF-8 during streaming. */
     val contentType: String? = null,
-    /**
-     * The undecoded body of a multipart answer, harness 0.1.7's shape for a result that carries
-     * raw bytes (see [RpcMultipart]); [body] is empty then. Null for every JSON answer.
-     */
+    /** Multipart compatibility path still carries raw attachments in memory. */
     val multipart: ByteArray? = null,
-)
+    private val diskLease: DiskLease? = null,
+) : Closeable {
+    private val text = body
+    private val closed = AtomicBoolean(false)
+    val storedOnDisk: Boolean get() = diskLease != null
+
+    /** Compatibility accessor. Typed production calls use openInputStream instead. */
+    val body: String get() {
+        check(!closed.get()) { "RPC response already closed" }
+        return diskLease?.file?.readText(Charsets.UTF_8) ?: text
+    }
+
+    fun openInputStream(): InputStream {
+        check(!closed.get()) { "RPC response already closed" }
+        return diskLease?.file?.inputStream() ?: ByteArrayInputStream(text.toByteArray(Charsets.UTF_8))
+    }
+
+    fun openReader(): Reader = openInputStream().reader(Charsets.UTF_8)
+
+    override fun close() {
+        // Legacy/custom transports may reuse an immutable in-memory fixture response.
+        if (diskLease != null && closed.compareAndSet(false, true)) diskLease.close()
+    }
+}
 
 /** Thrown by [RpcTransport] on a non-2xx carrier response or a network-level failure. */
 class RpcTransportException(
@@ -123,6 +151,7 @@ class OkHttpRpcTransport(
     writeTimeoutMs: Long = 30_000,
     private val authorization: String? = null,
     private val cookie: String? = null,
+    private val diskCacheStore: DiskCacheStore? = null,
 ) : RpcTransport {
 
     private val base: HttpUrl = baseUrl.toHttpUrl()
@@ -135,62 +164,94 @@ class OkHttpRpcTransport(
 
     private val packageClient by lazy { httpClient.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build() }
 
-    override suspend fun post(path: String, body: String): RpcHttpResponse =
+    override suspend fun post(path: String, body: String): RpcHttpResponse {
+        val target = resolveHarnessUrl(base.toString(), path)
+        val request = Request.Builder()
+            .url(target)
+            .header("Host", hostHeader)
+            .header("Content-Type", "application/json")
+            .authorized(authorization)
+            .cookied(cookie)
+            .post(body.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val carrier = if (path in setOf("/api/pluginManager/installBundle", "/api/pluginManager/waitForInstall")) packageClient else httpClient
+        return executeResponse(carrier, request)
+    }
+
+    /** The caller owns the answer, including the lease, even if dispatch is canceled after resume. */
+    private suspend fun executeResponse(carrier: OkHttpClient, request: Request): RpcHttpResponse =
         suspendCancellableCoroutine { continuation ->
-            val target = resolveHarnessUrl(base.toString(), path)
-            val request = Request.Builder()
-                .url(target)
-                .header("Host", hostHeader)
-                .header("Content-Type", "application/json")
-                .authorized(authorization)
-                .cookied(cookie)
-                .post(body.toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-            // Package operations are host-owned and may outlive the ordinary RPC read budget.
-            // Keep the connection budget, and let explicit cancellation or the host settle them.
-            val carrier = if (path in setOf("/api/pluginManager/installBundle", "/api/pluginManager/waitForInstall")) packageClient else httpClient
             val call = carrier.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isActive) {
-                        continuation.resumeWithException(
-                            RpcTransportException(0, "transport failure: ${e.message}", e),
-                        )
-                    }
+                    if (continuation.isActive) continuation.resumeWithException(
+                        RpcTransportException(0, "transport failure: ${e.message}", e))
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    response.use { resp ->
-                        val contentType = resp.header("Content-Type")
-                        if (resp.isSuccessful && RpcMultipart.isMultipart(contentType)) {
-                            val bytes = try {
-                                resp.body?.bytes() ?: ByteArray(0)
-                            } catch (e: IOException) {
-                                continuation.resumeWithException(
-                                    RpcTransportException(0, "transport failure: ${e.message}", e),
-                                )
-                                return
+                    try {
+                        response.use { resp ->
+                            if (!continuation.isActive) return
+                            val contentType = resp.header("Content-Type")
+                            val answer = if (resp.isSuccessful && RpcMultipart.isMultipart(contentType)) {
+                                RpcHttpResponse(resp.code, "", contentType, resp.body?.bytes() ?: ByteArray(0))
+                            } else readJsonResponse(resp) { continuation.isActive && !call.isCanceled() }
+                            if (!resp.isSuccessful) {
+                                answer.use {
+                                    val reason = if (resp.code == 403) try {
+                                        it.decodeStreaming(RefusalBody.serializer(), null).error
+                                            ?.trim()?.takeIf { value -> value.isNotEmpty() && value.length <= 200 }
+                                    } catch (error: IOException) { throw error }
+                                      catch (_: Exception) { null } else null
+                                    val message = reason?.let { value ->
+                                        "request refused before the harness: $value (HTTP 403)"
+                                    } ?: carrierMessage(resp.code)
+                                    throw RpcTransportException(resp.code, message,
+                                        retryAfterSeconds = retryAfterSecondsOf(resp))
+                                }
                             }
-                            continuation.resume(RpcHttpResponse(resp.code, "", contentType, bytes))
-                            return
+                            continuation.resume(answer, onCancellation = { cause, value, _ ->
+                                try { value.close() } catch (cleanup: Exception) { cause.addSuppressed(cleanup) }
+                            })
                         }
-                        val responseBody = resp.body?.string().orEmpty()
-                        if (resp.isSuccessful) {
-                            continuation.resume(RpcHttpResponse(resp.code, responseBody, contentType))
-                        } else {
-                            continuation.resumeWithException(
-                                RpcTransportException(
-                                    resp.code,
-                                    carrierMessage(resp.code, responseBody),
-                                    retryAfterSeconds = retryAfterSecondsOf(resp),
-                                ),
-                            )
-                        }
+                    } catch (error: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(
+                            if (error is RpcTransportException) error else RpcTransportException(0,
+                                "transport failure: ${error.message}", error))
                     }
                 }
             })
         }
+
+    private fun readJsonResponse(response: Response, active: () -> Boolean): RpcHttpResponse {
+        val store = diskCacheStore ?: return RpcHttpResponse(response.code,
+            response.body?.string().orEmpty(), response.header("Content-Type"))
+        val lease = store.createLease("rpc", ".json")
+        try {
+            // charStream honors Content-Type charset and BOM; OkHttp has already decoded gzip.
+            // Conversion is chunked, never a whole response String or intermediary JSON tree.
+            lease.file.bufferedWriter(Charsets.UTF_8).use { output ->
+                response.body?.charStream()?.use { input ->
+                    val buffer = CharArray(16 * 1024)
+                    while (true) {
+                        if (!active()) throw CancellationException("RPC response canceled")
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            if (!active()) throw CancellationException("RPC response canceled")
+            return RpcHttpResponse(response.code, "", response.header("Content-Type"), diskLease = lease)
+        } catch (error: Throwable) {
+            try { lease.close() } catch (cleanup: Exception) { error.addSuppressed(cleanup) }
+            throw error
+        }
+    }
+
+    @Serializable
+    private data class RefusalBody(val error: String? = null)
 
     /**
      * Downloads and uploads reuse the unary client's connection pool but relax the timeouts: a
@@ -239,7 +300,7 @@ class OkHttpRpcTransport(
         contentLength: Long,
         body: InputStream,
         onProgress: ((sent: Long) -> Unit)?,
-    ): RpcHttpResponse = withContext(Dispatchers.IO) {
+    ): RpcHttpResponse {
         val target = resolveHarnessUrl(base.toString(), path)
         val requestBody = object : RequestBody() {
             override fun contentType(): MediaType? = contentType.toMediaType()
@@ -264,16 +325,7 @@ class OkHttpRpcTransport(
             .cookied(cookie)
             .post(requestBody)
             .build()
-        val response = try {
-            downloadClient.newCall(request).execute()
-        } catch (e: IOException) {
-            throw RpcTransportException(0, "transport failure: ${e.message}", e)
-        }
-        response.use { resp ->
-            val responseBody = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw RpcTransportException(resp.code, carrierMessage(resp.code))
-            RpcHttpResponse(resp.code, responseBody)
-        }
+        return executeResponse(downloadClient, request)
     }
 
     private companion object {

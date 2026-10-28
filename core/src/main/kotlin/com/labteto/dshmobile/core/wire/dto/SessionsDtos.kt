@@ -436,7 +436,7 @@ data class PromptCommand(
 /** Value of `session.prompt`. [command] is always absent in practice — see [PromptCommand]. */
 @Serializable
 data class SessionPromptValue(
-    @SerialName("accepted") val accepted: Boolean = true,
+    @SerialName("accepted") val accepted: Boolean,
     @SerialName("command") val command: PromptCommand? = null,
 )
 

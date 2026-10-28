@@ -71,6 +71,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URLEncoder
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
@@ -132,48 +136,66 @@ class DshApiClient(
 
     /** POST one unary call with a raw [JsonElement] payload and decode the typed value. */
     private suspend fun <T> unary(endpoint: String, payload: JsonElement, value: KSerializer<T>): RpcResult<T> =
-        unaryWith(endpoint, payload) { json, _ -> decodeFromJsonElement(value, json) }
+        unaryUsing(endpoint, payload) { response, job ->
+            val multipart = response.multipart?.let { RpcMultipart.decode(response.contentType.orEmpty(), it) }
+            if (multipart != null) {
+                val envelope = decodeFromJsonElement(ServerResponse.serializer(), multipart.envelope)
+                require(envelope.type == "server-response") { "expected a server-response envelope" }
+                when (val result = envelope.result) {
+                    is RpcResult.Ok -> RpcResult.Ok(decodeFromJsonElement(value, result.value))
+                    is RpcResult.Err -> result
+                }
+            } else response.decodeStreaming(TypedServerResponseSerializer(value), job).result
+        }
 
-    /**
-     * POST one unary call and hand the result value, plus any raw-byte attachments, to [decode].
-     *
-     * Attachments exist only on harness 0.1.7's multipart answers (see [RpcMultipart]); for every
-     * JSON answer the map is empty.
-     */
+    /** Compatibility for opaque-value callbacks and multipart. No whole body String is required. */
     private suspend fun <T> unaryWith(
         endpoint: String,
         payload: JsonElement,
-        decode: (value: JsonElement, attachments: Map<List<String>, ByteArray>) -> T,
+        decodeValue: (JsonElement, Map<List<String>, ByteArray>) -> T,
+    ): RpcResult<T> = unaryUsing(endpoint, payload) { response, job ->
+        val multipart = response.multipart?.let { RpcMultipart.decode(response.contentType.orEmpty(), it) }
+        val envelope = if (multipart == null) response.decodeStreaming(ServerResponse.serializer(), job)
+            else decodeFromJsonElement(ServerResponse.serializer(), multipart.envelope)
+        require(envelope.type == "server-response") { "expected a server-response envelope" }
+        when (val result = envelope.result) {
+            is RpcResult.Ok -> RpcResult.Ok(decodeValue(result.value, multipart?.attachments.orEmpty()))
+            is RpcResult.Err -> result
+        }
+    }
+
+    private suspend fun <T> unaryUsing(
+        endpoint: String,
+        payload: JsonElement,
+        decode: (RpcHttpResponse, Job?) -> RpcResult<T>,
     ): RpcResult<T> {
         val request = ClientRequest(rpcId = newRpcId(), method = endpoint, payload = payload)
         return try {
-            val response = transport.post("/api/$endpoint", encodeEnvelope(request))
-            val multipart = response.multipart?.let { RpcMultipart.decode(response.contentType.orEmpty(), it) }
-            val envelope = decodeServerResponse(multipart?.envelope?.toString() ?: response.body)
-            when (val result = envelope.result) {
-                is RpcResult.Ok -> try {
-                    RpcResult.Ok(decode(result.value, multipart?.attachments.orEmpty()))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // Deliberately broad. A value of the wrong shape is not guaranteed to fail as
-                    // a SerializationException — decoding an object where a primitive is declared
-                    // can surface as an IndexOutOfBoundsException from inside the decoder — and
-                    // this method's whole contract is that a caller gets an RpcResult rather than
-                    // an exception. Letting one escape from here turns "that is not a harness"
-                    // into a crash on the connect screen.
-                    RpcResult.Err(notAHarness("response value decode failed: ${e.message}"))
+            // Own the answer outside withContext: canceled dispatch must also release the lease.
+            transport.post("/api/$endpoint", encodeEnvelope(request)).use { response ->
+                decodeResponse(response) { job ->
+                    when (val result = decode(response, job)) {
+                        is RpcResult.Ok -> result
+                        is RpcResult.Err -> RpcResult.Err(result.error.classifyCapability())
+                    }
                 }
-                is RpcResult.Err -> RpcResult.Err(result.error.classifyCapability())
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: RpcTransportException) {
             RpcResult.Err(transportError(e))
-        } catch (e: SerializationException) {
-            RpcResult.Err(notAHarness("response envelope decode failed: ${e.message}"))
-        } catch (e: IllegalArgumentException) {
-            RpcResult.Err(notAHarness(e.message ?: "invalid response"))
+        } catch (e: IOException) {
+            RpcResult.Err(transportError(RpcTransportException(0, "RPC response IO failure: ${e.message}", e)))
+        } catch (e: Exception) {
+            // Shape errors from custom DTO serializers are not always SerializationException.
+            RpcResult.Err(notAHarness("response decode failed: ${e.message}"))
         }
     }
+
+    /** Only file-backed answers require IO dispatch; preserve custom in-memory transport ordering. */
+    private suspend fun <T> decodeResponse(response: RpcHttpResponse, decode: (Job?) -> T): T =
+        if (response.storedOnDisk) withContext(Dispatchers.IO) { decode(currentCoroutineContext()[Job]) }
+        else decode(currentCoroutineContext()[Job])
 
     /**
      * Invoke one Remote endpoint with an explicit named-argument object.
@@ -328,6 +350,18 @@ class DshApiClient(
      */
     suspend fun sessionPage(request: SessionPageRequest): RpcResult<SessionPage> =
         callRequest("session/page", request)
+
+    /**
+     * Consume records on the IO decoder thread without retaining the complete records list. Stage
+     * callback writes until Ok: a later protocol/IO failure may follow already-delivered records.
+     * Each individual record's DTO/data still requires memory.
+     */
+    suspend fun sessionPageEach(
+        request: SessionPageRequest,
+        onRecord: (com.labteto.dshmobile.core.wire.dto.SessionHistoryRecord) -> Unit,
+    ): RpcResult<SessionPageMetadata> = unary(if (request.view == READER_VIEW) "session/readerPage" else "session/page",
+        buildJsonObject { put("args", buildJsonObject { put("request", encodeToJsonElement(SessionPageRequest.serializer(), request.copy(view = null))) }) },
+        SessionPageConsumerSerializer(request.throughSeq, onRecord))
 
     /** `session/modelCatalog` — every currently routable model, grouped by provider. */
     suspend fun sessionModelCatalog(): RpcResult<ModelCatalog> = callEmpty("session/modelCatalog")
@@ -846,25 +880,22 @@ class DshApiClient(
         val query = "sessionId=${encodeQueryComponent(sessionId)}" +
             if (name != null) "&name=${encodeQueryComponent(name)}" else ""
         return try {
-            val response = transport.upload(
+            transport.upload(
                 "$FILE_UPLOAD_PATH?$query",
                 "application/octet-stream",
                 contentLength,
                 body,
                 onProgress,
-            )
-            when (val result = decodeFromJsonElement(RpcResultJsonSerializer, WireJson.parseToJsonElement(response.body))) {
-                is RpcResult.Ok -> try {
-                    RpcResult.Ok(decodeFromJsonElement(FileUploadValue.serializer(), result.value))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    RpcResult.Err(notAHarness("upload value decode failed: ${e.message}"))
+            ).use { response ->
+                decodeResponse(response) { job ->
+                    response.decodeStreaming(TypedRpcResultSerializer(FileUploadValue.serializer()), job)
                 }
-                is RpcResult.Err -> result
             }
-        } catch (e: RpcTransportException) {
-            RpcResult.Err(transportError(e))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            RpcResult.Err(transportError(if (e is RpcTransportException) e else
+                RpcTransportException(0, "upload response IO failure: ${e.message}", e)))
         } catch (e: SerializationException) {
             RpcResult.Err(notAHarness("upload result decode failed: ${e.message}"))
         } catch (e: IllegalArgumentException) {

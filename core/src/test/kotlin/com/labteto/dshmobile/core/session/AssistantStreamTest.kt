@@ -14,6 +14,22 @@ import org.junit.Test
  */
 class AssistantStreamTest {
 
+    @Test fun `callback expansion validates whole input before publishing a prefix`() {
+        val stream = WireJson.parseToJsonElement("""[{"type":"text-chunks","time0":1,"index":0,"dt":[],"texts":["valid"]},{"type":"invalid"}]""")
+        val chunks = mutableListOf<TimedChunk>()
+        assertFalse(AssistantStream.forEachExpanded(stream) { chunks.add(it) })
+        assertTrue(chunks.isEmpty())
+        assertTrue(AssistantStream.expand(stream).isEmpty())
+    }
+
+    @Test fun `callback expansion equals list API for mixed run types and times`() {
+        val stream = WireJson.parseToJsonElement("""[{"type":"text-chunks","time0":10,"index":0,"dt":[-2],"texts":["a","b"]},{"type":"reasoning-chunks","time0":4,"index":1,"dt":[],"texts":["hmm"]},{"type":"tool-call-chunks","time0":7,"index":2,"dt":[],"id":"call","args":["{}"]},{"type":"chunk","time":9,"chunk":{"type":"finish"}}]""")
+        val chunks = mutableListOf<TimedChunk>()
+        assertTrue(AssistantStream.forEachExpanded(stream) { chunks.add(it) })
+        assertEquals(AssistantStream.expand(stream), chunks)
+        assertEquals(listOf(10L, 8L, 4L, 7L, 9L), chunks.map { it.time })
+    }
+
     @Test
     fun `a text run expands into one delta per fragment with accumulated times`() {
         val chunks = AssistantStream.expand(
@@ -100,6 +116,18 @@ class AssistantStreamTest {
             WireJson.parseToJsonElement("""[{"type":"tool-call-chunks","time0":1,"index":0,"dt":[],"args":["{}"]}]"""),
         )
         assertTrue(idLess.isEmpty())
+    }
+
+    @Test
+    fun `compact runs expand fully beyond the withdrawn count threshold`() {
+        val texts = List(4_200) { "\"fragment-$it\"" }.joinToString(",")
+        val gaps = List(4_199) { "1" }.joinToString(",")
+        val stream = WireJson.parseToJsonElement(
+            """[{"type":"text-chunks","time0":1,"index":0,"dt":[$gaps],"texts":[$texts]}]""",
+        )
+        val chunks = AssistantStream.expand(stream)
+        assertEquals(4_200, chunks.size)
+        assertEquals("fragment-4199", chunks.last().chunk.getValue("text").jsonPrimitive.content)
     }
 
     @Test

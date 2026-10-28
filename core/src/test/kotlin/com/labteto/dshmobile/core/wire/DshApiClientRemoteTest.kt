@@ -238,6 +238,18 @@ class DshApiClientRemoteTest {
     }
 
     @Test
+    fun `a successful envelope without a receipt cannot confirm delivery`() = runTest {
+        val transport = RecordingTransport { _, body ->
+            val rpcId = Json.parseToJsonElement(body).jsonObject["rpcId"]!!.jsonPrimitive.content
+            ok(rpcId, "{}")
+        }
+        val result = client(transport).sessionPrompt(
+            SessionPromptRequest(requestId = "receipt-test", sessionId = "session-7", mode = "queue"),
+        )
+        assertTrue(result is RpcResult.Err)
+    }
+
+    @Test
     fun `a subagent prompt carries one too`() = runTest {
         val transport = RecordingTransport { _, body ->
             val rpcId = Json.parseToJsonElement(body).jsonObject["rpcId"]!!.jsonPrimitive.content
