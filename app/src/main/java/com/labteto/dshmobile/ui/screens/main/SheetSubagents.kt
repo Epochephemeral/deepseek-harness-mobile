@@ -75,6 +75,7 @@ internal fun SubagentsSheet(
     val colors = DsTheme.colors
     val childId = conversation?.sessionId
     val connection by store.connectionState.collectAsStateWithLifecycle()
+    val history by store.subagentHistoryState.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(connection.phase) {
         if (connection.phase == com.labteto.dshmobile.connection.ConnectionPhase.CONNECTED && childId != null) {
             store.openSubagentTranscript(childId)
@@ -143,7 +144,15 @@ internal fun SubagentsSheet(
                         ) {
                             val childContext = ChatNodeContext(child.nodes, child.running, null,
                                 onOpenSubagent = {}, onBranchFrom = {}, onFeedback = { _, _ -> })
-                            child.nodes.forEach { node -> ChatNodeItem(node, childContext) }
+                            androidx.compose.runtime.key(child.sessionId) {
+                                SubagentTranscriptViewport(child, history, childContext,
+                                    onLoadOlder = { scope.launch { store.loadSubagentOlder(child.sessionId) } },
+                                    onLoadNewer = { scope.launch { store.loadSubagentNewer(child.sessionId) } },
+                                    onShowLatest = { store.showLatestSubagentHistory(child.sessionId) },
+                                    onViewport = { anchor, atTail -> store.updateSubagentHistoryViewport(anchor, atTail, child.sessionId) },
+                                    onRetryFollow = { scope.launch { store.openSubagentTranscript(child.sessionId) } },
+                                )
+                            }
                         }
                     }
                 }

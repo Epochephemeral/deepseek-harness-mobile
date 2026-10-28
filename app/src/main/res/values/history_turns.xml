@@ -1,0 +1,7 @@
+<resources>
+    <string name="history_turn_label">Turn %1$d</string>
+    <string name="history_turn_no_prompt">No prompt preview</string>
+    <string name="history_turn_loading">Loading turn…</string>
+    <string name="history_turn_failed">Could not open this turn. Tap to retry.</string>
+    <string name="history_window_empty">No prompts in this loaded window. Load older or newer messages to browse more.</string>
+</resources>

@@ -39,9 +39,9 @@ internal const val SEARCH_RESULT_LIMIT = 30
  * Local rows lead, newest first; content-only rows follow in the host's ranking. A session matched
  * both ways keeps its local position and gains the host's snippet.
  *
- * Two exclusions carry over from the reference. Blank sessions never match: their displayed title
- * is a localized placeholder, so matching on it would make results depend on the UI language.
- * Archived sessions never match either — they are out of the list the query is asking about.
+ * The same eligibility as the drawer applies before either source is merged: subagent transcripts
+ * belong in the parent's dedicated panel, archived sessions are out of the list being searched, and
+ * blank sessions have a localized placeholder rather than a searchable conversation title.
  *
  * A free function so the ordering and dedup rules can be tested without a device, in the same
  * spirit as `sameSubnet` in the discovery engine.
@@ -60,15 +60,12 @@ internal fun deriveSearchResults(
     val workspaceTitleOf = workspaces
         .flatMap { ws -> ws.sessionIds.map { it to ws.title.ifBlank { basename(ws.path) } } }
         .toMap()
-    val sessionsById = sessions.associateBy { it.sessionId }
+    val eligible = drawerConversationRows(sessions, archivedIds)
+    val sessionsById = eligible.associateBy { it.sessionId }
     fun labelOf(session: SessionRow): String =
         workspaceTitleOf[session.sessionId] ?: session.cwd?.let { basename(it) } ?: ""
 
-    fun eligible(session: SessionRow): Boolean =
-        !session.blank && session.sessionId !in archivedIds
-
-    val local = sessions
-        .filter { eligible(it) }
+    val local = eligible
         .filter {
             sessionTitle(it).lowercase(Locale.ROOT).contains(q) ||
                 labelOf(it).lowercase(Locale.ROOT).contains(q)
@@ -79,7 +76,7 @@ internal fun deriveSearchResults(
     val ordered = LinkedHashMap<String, SessionRow>()
     local.forEach { ordered.putIfAbsent(it.sessionId, it) }
     contentHits.forEach { (sessionId, _) ->
-        sessionsById[sessionId]?.takeIf { eligible(it) }?.let { ordered.putIfAbsent(sessionId, it) }
+        sessionsById[sessionId]?.let { ordered.putIfAbsent(sessionId, it) }
     }
 
     val rows = ordered.values.map { session ->

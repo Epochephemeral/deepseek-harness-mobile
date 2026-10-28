@@ -22,6 +22,65 @@ class SessionHistoryTest {
 
     private fun toolCall(seq: Long) = ToolCallNode(seq, "c$seq", "read", "{}", 1, 1)
 
+    private fun outline(text: String) = kotlinx.serialization.json.Json.parseToJsonElement(text)
+
+    @Test
+    fun `wire array gives complete directory with one entry per turn`() {
+        val projection = outline("""[
+            {"turn":0,"seq":1,"prompt":"unloaded first","response":"first answer"},
+            {"turn":1,"seq":100,"prompt":"short…","response":"second answer"}
+        ]""")
+        val entries = historyEntries(listOf(TurnStartNode(100, 1), user(101, "full loaded prompt"), user(105, "steering")), false,
+            mapOf(101L to 999L), projection)
+        assertEquals(listOf(1L, 0L), entries.map { it.turn })
+        assertEquals(listOf(100L, 1L), entries.map { it.targetStartSeq })
+        assertEquals("full loaded prompt", entries[0].text)
+        assertEquals(999L, entries[0].timeMs)
+        assertTrue(entries[0].promptLoaded)
+        assertEquals("unloaded first", entries[1].text)
+        assertEquals("first answer", entries[1].response)
+        assertEquals(100L, entries[1].endSeqExclusive)
+        assertFalse(entries[1].promptLoaded)
+        assertEquals(2, historyEntries(emptyList(), false, turnOutline = projection).size)
+    }
+
+    @Test
+    fun `partial turn window does not replace original preview with steering`() {
+        val projection = outline("""[{"turn":1,"seq":1,"prompt":"original","response":""}]""")
+        val entry = historyEntries(listOf(user(50, "later steering")), false, turnOutline = projection).single()
+        assertEquals("original", entry.text)
+        assertFalse(entry.promptLoaded)
+    }
+
+    @Test
+    fun `malformed or unavailable projection falls back without throwing`() {
+        val bad = listOf("null", "{}", "[null]", """[{"turn":-1,"seq":1,"prompt":"x","response":""}]""",
+            """[{"turn":"1","seq":1,"prompt":"x","response":""}]""",
+            """[{"turn":1,"seq":1,"prompt":{},"response":""}]""",
+            """[{"turn":1,"seq":1,"prompt":"x","response":""},{"turn":1,"seq":2,"prompt":"y","response":""}]""")
+        for (value in bad) {
+            assertNull(parseTurnOutline(outline(value)))
+            assertEquals(listOf(8L), historyEntries(listOf(user(8, "loaded")), false, turnOutline = outline(value)).map { it.seq })
+        }
+        assertEquals(emptyList<HistoryTurn>(), parseTurnOutline(outline("[]")))
+    }
+
+    @Test
+    fun `jump chooses visible human prompt rather than invisible start or injected context`() {
+        val entry = HistoryEntry(10, "prompt", false, null, turn = 1, targetStartSeq = 10, endSeqExclusive = 30)
+        val nodes = listOf(TurnStartNode(10, 1), user(11, "context", "skill"), user(12, "prompt"), assistant(13, "answer"))
+        assertEquals(12L, historyJumpTarget(entry, nodes, false))
+        assertEquals(13L, historyJumpTarget(entry, listOf(TurnStartNode(10, 1), assistant(13, "answer")), false))
+    }
+
+    @Test
+    fun `jump never falls into next turn when requested turn has no visible rows`() {
+        val entry = HistoryEntry(10, "prompt", false, null, turn = 1, targetStartSeq = 10, endSeqExclusive = 30)
+        assertNull(historyJumpTarget(entry, listOf(TurnStartNode(10, 1), TurnStartNode(30, 2), user(31, "next")), false))
+        assertNull(historyJumpTarget(entry.copy(endSeqExclusive = null), listOf(TurnStartNode(10, 1), TurnStartNode(30, 2), user(31, "next")), false))
+        assertNull(historyJumpTarget(HistoryEntry(10, "gone", false, null), listOf(user(11, "other")), false))
+    }
+
     @Test
     fun `lists only the readers own prompts, newest first`() {
         val nodes: List<ChatNode> = listOf(

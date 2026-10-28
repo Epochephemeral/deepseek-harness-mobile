@@ -59,9 +59,7 @@ internal fun ArchivedSessions(store: SessionStore) {
 
     ChatSearchField(query) { query = it }
 
-    val rows = sessions
-        .filter { it.sessionId in archived }
-        .filter { query.isBlank() || it.title.orEmpty().contains(query, true) || it.cwd.orEmpty().contains(query, true) }
+    val rows = archivedConversationRows(sessions, archived, query)
         .sortedByDescending { it.updatedAt }
 
     if (failed) {

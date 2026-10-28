@@ -24,13 +24,15 @@ class SessionSearchTest {
         cwd: String? = null,
         updatedAt: Long = 0L,
         blank: Boolean = false,
+        parent: String? = null,
+        origin: String? = null,
     ) = SessionRow(
         sessionId = id,
         title = title,
         running = false,
         blank = blank,
-        parentSessionId = null,
-        origin = null,
+        parentSessionId = parent,
+        origin = origin,
         cwd = cwd,
         agentPreset = null,
         updatedAt = updatedAt,
@@ -93,6 +95,40 @@ class SessionSearchTest {
             query = "planning",
         )
         assertTrue(result.items.isEmpty())
+    }
+
+    @Test
+    fun `local title and workspace matches exclude nested and orphan subagents`() {
+        val rows = listOf(
+            session("parent", title = "plan parent"),
+            session("child", title = "plan child", parent = "parent", origin = "subagent"),
+            session("nested", title = "plan nested", parent = "child", origin = "subagent"),
+            session("orphan", title = "plan orphan", parent = "missing", origin = "subagent"),
+            session("fork", title = "plan fork", parent = "parent"),
+        )
+        val workspace = WorkspaceRow("w", "/plan", "plan workspace", rows.map { it.sessionId })
+        val result = derive(rows, workspaces = listOf(workspace), query = "plan")
+        assertEquals(listOf("parent", "fork"), result.items.map { it.session.sessionId })
+    }
+
+    @Test
+    fun `host content hits cannot reintroduce subagents or consume the result limit`() {
+        val rows = listOf(
+            session("child", parent = "missing", origin = "subagent"),
+            session("nested", parent = "child", origin = "subagent"),
+            session("archived-child", parent = "nested", origin = "subagent"),
+            session("fork", parent = "missing"),
+        )
+        val result = derive(
+            sessions = rows,
+            archived = setOf("archived-child"),
+            query = "content-only",
+            content = rows.map { it.sessionId to "matching excerpt" },
+            limit = 1,
+        )
+        assertEquals(listOf("fork"), result.items.map { it.session.sessionId })
+        assertEquals("matching excerpt", result.items.single().snippet)
+        assertFalse(result.hasMore)
     }
 
     @Test

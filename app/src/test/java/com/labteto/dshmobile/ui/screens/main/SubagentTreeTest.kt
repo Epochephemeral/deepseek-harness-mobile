@@ -5,97 +5,101 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * How the drawer decides what nests under what.
- *
- * The distinction that carries the whole feature is `origin`: `parentSessionId` alone does not mean
- * "subagent", because an ordinary fork sets one too — and a fork is a session in its own right that
- * belongs at the top level, not tucked inside the session it branched from.
- */
+/** Subagent trees belong only in the dedicated panel, not in any drawer list projection. */
 class SubagentTreeTest {
 
     private fun session(
         id: String,
         parent: String? = null,
         origin: String? = null,
+        blank: Boolean = false,
+        updatedAt: Long = 0L,
     ) = SessionRow(
         sessionId = id,
         title = id,
         running = false,
-        blank = false,
+        blank = blank,
         parentSessionId = parent,
         origin = origin,
         cwd = null,
         agentPreset = null,
-        updatedAt = 0L,
+        updatedAt = updatedAt,
         pendingInteraction = null,
     )
 
-    private fun index(listable: List<SessionRow>, all: List<SessionRow> = listable) =
-        indexSubagents(listable, all.associateBy { it.sessionId })
-
     @Test
-    fun `a subagent nests under its parent`() {
-        val rows = listOf(session("root"), session("kid", parent = "root", origin = "subagent"))
-        assertEquals(mapOf("root" to listOf(rows[1])), index(rows))
-    }
-
-    @Test
-    fun `a fork stays at the top level`() {
-        val rows = listOf(session("root"), session("forked", parent = "root"))
-        assertTrue(index(rows).isEmpty())
-    }
-
-    @Test
-    fun `a session with no parent nests nowhere`() {
-        assertTrue(index(listOf(session("root"), session("other"))).isEmpty())
-    }
-
-    @Test
-    fun `subagents of a subagent nest under it, not under the root`() {
+    fun `nested subagents are excluded while parents and regular forks remain`() {
         val rows = listOf(
             session("root"),
-            session("kid", parent = "root", origin = "subagent"),
-            session("grandkid", parent = "kid", origin = "subagent"),
+            session("child", parent = "root", origin = "subagent"),
+            session("grandchild", parent = "child", origin = "subagent"),
+            session("fork", parent = "root"),
+            session("fork-from-child", parent = "child", origin = "fork"),
         )
-        val tree = index(rows)
-        assertEquals(listOf("kid"), tree["root"]?.map { it.sessionId })
-        assertEquals(listOf("grandkid"), tree["kid"]?.map { it.sessionId })
-    }
-
-    /** Archiving a parent used to take its subagents off the list with it. */
-    @Test
-    fun `a subagent whose parent is hidden re-attaches to the nearest visible ancestor`() {
-        val root = session("root")
-        val hidden = session("hidden", parent = "root", origin = "subagent")
-        val orphan = session("orphan", parent = "hidden", origin = "subagent")
-        val tree = index(listable = listOf(root, orphan), all = listOf(root, hidden, orphan))
-        assertEquals(listOf("orphan"), tree["root"]?.map { it.sessionId })
+        assertEquals(listOf("root", "fork", "fork-from-child"), drawerConversationRows(rows, emptySet()).map { it.sessionId })
+        // Filtering navigation must not remove the store catalog used by the child panel.
+        assertEquals(5, rows.size)
     }
 
     @Test
-    fun `a subagent with no visible ancestor is left ungrouped`() {
-        val hidden = session("hidden", origin = "subagent")
-        val orphan = session("orphan", parent = "hidden", origin = "subagent")
-        assertTrue(index(listable = listOf(orphan), all = listOf(hidden, orphan)).isEmpty())
-    }
-
-    /** A malformed lineage must not spin the walk forever — the drawer would hang with it. */
-    @Test
-    fun `a lineage cycle terminates`() {
-        val a = session("a", parent = "b", origin = "subagent")
-        val b = session("b", parent = "a", origin = "subagent")
-        val tree = index(listable = listOf(a), all = listOf(a, b))
-        assertTrue(tree.isEmpty())
+    fun `orphans and subagents without a parent never become ungrouped conversations`() {
+        val rows = listOf(
+            session("orphan", parent = "missing", origin = "subagent"),
+            session("no-parent", origin = "subagent"),
+            session("normal-orphan", parent = "missing"),
+        )
+        assertEquals(listOf("normal-orphan"), drawerConversationRows(rows, emptySet()).map { it.sessionId })
     }
 
     @Test
-    fun `several subagents of one parent are grouped together`() {
+    fun `archived or blank ancestry does not make a child visible`() {
+        val rows = listOf(
+            session("archived-parent"),
+            session("blank-parent", blank = true),
+            session("archived-child", parent = "archived-parent", origin = "subagent"),
+            session("blank-child", parent = "blank-parent", origin = "subagent"),
+        )
+        assertTrue(drawerConversationRows(rows, setOf("archived-parent")).isEmpty())
+    }
+
+    @Test
+    fun `workspace pinned and recency projections share the filtered drawer catalog`() {
+        val rows = listOf(
+            session("root", updatedAt = 10),
+            session("child", parent = "root", origin = "subagent", updatedAt = 100),
+            session("fork", parent = "root", updatedAt = 20),
+        )
+        val listable = drawerConversationRows(rows, emptySet()).associateBy { it.sessionId }
+        val workspaceOrder = listOf("child", "root", "fork")
+        val pinnedOrder = listOf("child", "fork")
+        assertEquals(listOf("root", "fork"), workspaceOrder.mapNotNull(listable::get).map { it.sessionId })
+        assertEquals(listOf("fork"), pinnedOrder.mapNotNull(listable::get).map { it.sessionId })
+        assertEquals(listOf("fork", "root"), listable.values.sortedByDescending { it.updatedAt }.map { it.sessionId })
+    }
+
+    @Test
+    fun `archive excludes nested and orphan subagents but retains regular archived forks`() {
         val rows = listOf(
             session("root"),
-            session("k1", parent = "root", origin = "subagent"),
-            session("k2", parent = "root", origin = "subagent"),
+            session("child", parent = "root", origin = "subagent"),
+            session("grandchild", parent = "child", origin = "subagent"),
+            session("orphan", parent = "missing", origin = "subagent"),
+            session("fork", parent = "root"),
+            session("active"),
         )
-        assertEquals(listOf("k1", "k2"), index(rows)["root"]?.map { it.sessionId })
+        val archived = rows.map { it.sessionId }.toSet() - "active"
+        assertEquals(listOf("root", "fork"), archivedConversationRows(rows, archived).map { it.sessionId })
+        assertTrue(archivedConversationRows(rows, archived, "child").isEmpty())
+        assertEquals(listOf("fork"), archivedConversationRows(rows, archived, "FORK").map { it.sessionId })
+    }
+
+    @Test
+    fun `unknown origins remain conversations and cycles need no tree traversal`() {
+        val rows = listOf(
+            session("a", parent = "b", origin = "subagent"),
+            session("b", parent = "a", origin = "subagent"),
+            session("future-origin", parent = "a", origin = "future"),
+        )
+        assertEquals(listOf("future-origin"), drawerConversationRows(rows, emptySet()).map { it.sessionId })
     }
 }

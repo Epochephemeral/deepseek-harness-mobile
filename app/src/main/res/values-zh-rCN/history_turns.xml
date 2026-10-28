@@ -1,0 +1,7 @@
+<resources>
+    <string name="history_turn_label">第 %1$d 轮</string>
+    <string name="history_turn_no_prompt">暂无提问预览</string>
+    <string name="history_turn_loading">正在加载此轮对话…</string>
+    <string name="history_turn_failed">无法打开此轮对话，点按重试。</string>
+    <string name="history_window_empty">当前已加载的范围内没有提问，可加载更早或更新的消息继续浏览。</string>
+</resources>
