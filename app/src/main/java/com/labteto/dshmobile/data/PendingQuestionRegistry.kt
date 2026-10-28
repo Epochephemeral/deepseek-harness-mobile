@@ -52,6 +52,9 @@ internal class PendingQuestionRegistry {
         return true
     }
 
+    /** A different host cannot inherit any request identity from the previous endpoint. */
+    fun clear() = bySession.clear()
+
     /** Drop [sessionId] entirely: the session itself is gone, so nothing about it can be answered. */
     fun discard(sessionId: String) {
         bySession.remove(sessionId)

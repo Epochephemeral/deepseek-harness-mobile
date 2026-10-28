@@ -102,7 +102,7 @@ class HistoryCacheTest {
     @Test fun `corrupt entries are discarded and stale content is never substituted`() = runBlocking {
         val cache = HistoryCache(directory())
         cache.write("h", "s", cache.ticket(), events())
-        directory().listFiles()!!.single().writeText("truncated gzip")
+        directory().listFiles()!!.single { it.extension == "gz" }.writeText("truncated gzip")
         assertNull(cache.read("h", "s", cache.ticket()))
         assertEquals(HistoryCacheUsage(), cache.usage.value)
     }
