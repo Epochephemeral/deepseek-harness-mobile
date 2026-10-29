@@ -7,6 +7,8 @@ classes=(
   com.labteto.dshmobile.data.SessionHistoryStoreTest
   com.labteto.dshmobile.data.SessionReadOwnershipTest
   com.labteto.dshmobile.data.SessionHistoryDiskTest
+  com.labteto.dshmobile.data.ZenComposerUiTest
+  com.labteto.dshmobile.data.ZenChatScreenTest
   com.labteto.dshmobile.ui.screens.main.ChatTranscriptContinuityTest
   com.labteto.dshmobile.ui.screens.main.ChatTranscriptDiskPagingTest
   com.labteto.dshmobile.ui.screens.main.ChatTranscriptTailTest

@@ -91,8 +91,8 @@ fun ChatScreen(
     onOpenDetails: () -> Unit,
     onOpenDrawer: () -> Unit,
     detailsOpen: Boolean,
+    store: SessionStore = rememberSessionStore(),
 ) {
-    val store = rememberSessionStore()
     val scope = rememberCoroutineScope()
     val colors = DsTheme.colors
     val context = LocalContext.current
@@ -677,8 +677,7 @@ fun ChatScreen(
                     }
                 }
 
-                // Current tasks/goals are reader content, not diagnostics: retain them in Zen.
-                conversation?.let { conv ->
+                if (!zenMode) conversation?.let { conv ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -689,7 +688,7 @@ fun ChatScreen(
                         // transcript up rather than shoving it by a whole row in a single frame.
                         AnimatedPresence(parseTodos(conv.projections["todos"])?.takeIf { it.isNotEmpty() }) { TodoDock(it) }
                         AnimatedPresence(parseGoal(conv.projections["goal"])) { GoalBar(it, store) }
-                        if (!zenMode) AnimatedPresence(conv.queue.takeIf { it.isNotEmpty() }) { QueueDock(it, store) }
+                        AnimatedPresence(conv.queue.takeIf { it.isNotEmpty() }) { QueueDock(it, store) }
                     }
                 }
 
